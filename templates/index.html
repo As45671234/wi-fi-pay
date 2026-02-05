@@ -114,8 +114,15 @@
         // Показываем кнопку оплаты и обновляем сумму
         document.getElementById('pay-button-container').style.display = 'block';
         document.getElementById('total-amount').innerText = amount + ' ₸';
-        
-        console.log("Выбран тариф: " + title + " (" + amount + " KZT)");
+
+        // Оживляем кнопку:
+        const payBtn = document.querySelector('#pay-button-container button');
+        payBtn.onclick = function() {
+            const mac = "{{ mac }}";
+            const router = "{{ router_id }}";
+            // Перенаправляем на серверную логику
+            window.location.href = `/create_payment?mac=${mac}&amount=${amount}&router_id=${router}`;
+        };
     }
 </script>
 <footer class="mt-5 pb-5 text-center text-muted" style="font-size: 0.75rem;">
@@ -136,8 +143,8 @@
 
         <!-- Ссылки на документы -->
         <div class="mb-4">
-            <a href="#" class="text-decoration-none me-3">Публичная оферта</a>
-            <a href="#" class="text-decoration-none">Политика конфиденциальности</a>
+            <a href="/offer" class="text-decoration-none me-3">Публичная оферта</a>
+            <a href="/privacy" class="text-decoration-none">Политика конфиденциальности</a>
         </div>
 
         <!-- Логотипы систем -->
