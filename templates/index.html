@@ -106,22 +106,21 @@
 
 <script>
     function selectTariff(element, amount, title) {
-        // Убираем активный класс у всех кнопок
+        // Убираем активный класс у всех
         document.querySelectorAll('.btn-tariff').forEach(btn => btn.classList.remove('active'));
-        // Добавляем активный класс нажатой
         element.classList.add('active');
         
-        // Показываем кнопку оплаты и обновляем сумму
         document.getElementById('pay-button-container').style.display = 'block';
         document.getElementById('total-amount').innerText = amount + ' ₸';
 
-        // Оживляем кнопку:
         const payBtn = document.querySelector('#pay-button-container button');
         payBtn.onclick = function() {
-            const mac = "{{ mac }}";
-            const router = "{{ router_id }}";
-            // Перенаправляем на серверную логику
-            window.location.href = `/create_payment?mac=${mac}&amount=${amount}&router_id=${router}`;
+            // Используем безопасную передачу переменных через Jinja
+            const mac = "{{ mac|default('00:00:00:00:00:00') }}";
+            const router = "{{ router_id|default('default') }}";
+            
+            // Переходим на страницу, которую мы создали в Python
+            window.location.href = "/create_payment?mac=" + mac + "&amount=" + amount + "&router_id=" + router;
         };
     }
 </script>
