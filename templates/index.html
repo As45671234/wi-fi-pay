@@ -4,41 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wi-Fi Access - Оплата доступа</title>
-    <!-- Подключаем Bootstrap для красоты -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Иконки -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     
     <style>
         body { background: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .main-card {
-            border: none;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-            margin-top: 50px;
+            border: none; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); margin-top: 50px;
         }
         .btn-tariff {
-            border: 2px solid #e9ecef;
-            border-radius: 12px;
-            transition: all 0.3s;
-            text-align: left;
-            background: white;
+            border: 2px solid #e9ecef; border-radius: 12px; transition: all 0.3s; text-align: left; background: white;
         }
-        .btn-tariff:hover {
-            border-color: #0d6efd;
-            background: #f8fbff;
+        .btn-tariff:hover, .btn-tariff.active {
+            border-color: #0d6efd; background: #f0f7ff;
         }
-        .btn-tariff.active {
-            border-color: #0d6efd;
-            background: #f0f7ff;
-        }
-        .kaspi-red { color: #f14635; font-weight: bold; }
         .mac-address { font-size: 0.75rem; color: #adb5bd; }
-        #pay-button-container {
-            display: none; /* Появится после выбора тарифа */
-            animation: fadeIn 0.5s;
-        }
+        #pay-button-container { display: none; animation: fadeIn 0.5s; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* Стили для фрейма */
+        .payment-iframe { width: 100%; height: 600px; border: none; }
     </style>
 </head>
 <body>
@@ -53,37 +38,30 @@
                     <p class="text-muted small">Выберите время доступа и оплатите картой любого банка</p>
                 </div>
 
-                <!-- Выбор тарифа -->
+                <!-- Тарифы -->
                 <div class="d-grid gap-3">
                     <button class="btn btn-tariff p-3" onclick="selectTariff(this, 100, '1 час')">
                         <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="d-block fw-bold">1 Час доступа</span>
-                                <small class="text-muted">Для быстрой проверки почты</small>
-                            </div>
+                            <div><span class="d-block fw-bold">1 Час доступа</span></div>
                             <span class="badge bg-light text-dark fs-6">100 ₸</span>
                         </div>
                     </button>
-
                     <button class="btn btn-tariff p-3" onclick="selectTariff(this, 500, 'Весь день')">
                         <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="d-block fw-bold">Весь день</span>
-                                <small class="text-muted">Максимальный комфорт</small>
-                            </div>
+                            <div><span class="d-block fw-bold">Весь день</span></div>
                             <span class="badge bg-light text-dark fs-6">500 ₸</span>
                         </div>
                     </button>
                 </div>
 
-                <!-- Блок оплаты -->
+                <!-- Кнопка оплаты -->
                 <div id="pay-button-container" class="mt-4">
                     <hr>
                     <div class="d-flex justify-content-between mb-3">
                         <span>К оплате:</span>
                         <span id="total-amount" class="fw-bold fs-5">0 ₸</span>
                     </div>
-                    <button class="btn btn-primary btn-lg w-100 p-3 fw-bold shadow-sm">
+                    <button id="btn-pay-action" class="btn btn-primary btn-lg w-100 p-3 fw-bold shadow-sm">
                         <i class="bi bi-credit-card-2-front me-2"></i> ОПЛАТИТЬ КАРТОЙ
                     </button>
                     <div class="text-center mt-3">
@@ -97,65 +75,86 @@
                 </div>
             </div>
             
-            <p class="text-center mt-4 text-muted small">
-                Нажимая «Оплатить», вы принимаете условия <a href="/offer" class="text-decoration-none">оферты</a>
-            </p>
+            <footer class="mt-5 pb-5 text-center text-muted" style="font-size: 0.75rem;">
+                <div class="container">
+                    <hr class="mb-4">
+                    <p class="mb-1 fw-bold text-uppercase">ИП КАЛКИЕВ</p>
+                    <div class="mb-4">
+                        <a href="/payment-methods" class="text-decoration-none me-3">Оплата и Возврат</a>
+                        <a href="/offer" class="text-decoration-none me-3">Оферта</a>
+                        <a href="/privacy" class="text-decoration-none">Приватность</a>
+                    </div>
+                    <p class="mt-4 mb-0 small opacity-50">&copy; 2026 Wi-Fi Pay.</p>
+                </div>
+            </footer>
         </div>
     </div>
 </div>
 
+<!-- МОДАЛЬНОЕ ОКНО ДЛЯ ОПЛАТЫ -->
+<div class="modal fade" id="paymentModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered modal-lg"> <!-- modal-lg делает окно пошире -->
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Безопасная оплата</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div id="loader" class="text-center p-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2">Соединение с банком...</p>
+        </div>
+        <iframe id="paymentFrame" class="payment-iframe" src="" style="display:none;"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Скрипты -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    let selectedAmount = 0;
+    const paymentModal = new bootstrap.Modal(document.getElementById('paymentModal'));
+    const paymentFrame = document.getElementById('paymentFrame');
+    const loader = document.getElementById('loader');
+
     function selectTariff(element, amount, title) {
-        // Убираем активный класс у всех
         document.querySelectorAll('.btn-tariff').forEach(btn => btn.classList.remove('active'));
         element.classList.add('active');
-        
         document.getElementById('pay-button-container').style.display = 'block';
         document.getElementById('total-amount').innerText = amount + ' ₸';
-
-        const payBtn = document.querySelector('#pay-button-container button');
-        payBtn.onclick = function() {
-            // Используем безопасную передачу переменных через Jinja
-            const mac = "{{ mac|default('00:00:00:00:00:00') }}";
-            const router = "{{ router_id|default('default') }}";
-            
-            // Переходим на страницу, которую мы создали в Python
-            window.location.href = "/create_payment?mac=" + mac + "&amount=" + amount + "&router_id=" + router;
-        };
+        selectedAmount = amount;
     }
+
+    document.getElementById('btn-pay-action').onclick = function() {
+        // 1. Показываем модальное окно
+        paymentModal.show();
+        loader.style.display = 'block';
+        paymentFrame.style.display = 'none';
+
+        // 2. Данные
+        const mac = "{{ mac|default('00:00:00:00:00:00') }}";
+        const router = "{{ router_id|default('default') }}";
+
+        // 3. Запрашиваем ссылку у сервера (AJAX)
+        fetch(`/api/get_payment_url?mac=${mac}&amount=${selectedAmount}&router_id=${router}`)
+            .then(response => response.json())
+            .then(data => {
+                // 4. Открываем ссылку во фрейме
+                paymentFrame.src = data.payment_url;
+                
+                // Когда фрейм загрузится, убираем крутилку
+                paymentFrame.onload = function() {
+                    loader.style.display = 'none';
+                    paymentFrame.style.display = 'block';
+                };
+            })
+            .catch(error => {
+                alert("Ошибка соединения с сервером");
+                paymentModal.hide();
+            });
+    };
 </script>
-<footer class="mt-5 pb-5 text-center text-muted" style="font-size: 0.75rem;">
-    <div class="container">
-        <hr class="mb-4">
-        
-        <!-- Юридические данные -->
-        <p class="mb-1 fw-bold text-uppercase">ИП КАЛКИЕВ</p>
-        <p class="mb-1">ИИН: 941014300163</p>
-        <p class="mb-1">Адрес: г. Актау, мкр. 19, д. 35, кв. 68</p>
-        <p class="mb-3">Контакты: +7 (778) 468-12-36</p>
-
-        <!-- Банковские реквизиты (для солидности) -->
-        <div class="mb-3 text-secondary small">
-            <span class="d-block">АО "Kaspi Bank", БИК: CASPKZKA</span>
-            <span class="d-block">IBAN: KZ53722S000050317735</span>
-        </div>
-
-        <!-- Ссылки на документы -->
-        <div class="mb-4">
-            <a href="/payment-methods" class="text-decoration-none me-3">Способы оплаты</a>
-            <a href="/offer" class="text-decoration-none me-3">Публичная оферта</a>
-            <a href="/privacy" class="text-decoration-none">Приватность</a>
-        </div>
-
-        <!-- Логотипы систем -->
-        <div>
-            <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" height="24" class="me-3 opacity-75" alt="Visa">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" height="24" class="opacity-75" alt="Mastercard">
-        </div>
-        
-        <p class="mt-4 mb-0 small opacity-50">&copy; 2026 Wi-Fi Pay. All rights reserved.</p>
-    </div>
-</footer>
 
 </body>
 </html>
