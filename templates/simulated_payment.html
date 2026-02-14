@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Freedom Pay — Оплата</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+        <div class="flex justify-between items-center mb-8">
+            <img src="https://freedompay.kz/images/logo.svg" width="120">
+            <span class="text-gray-400 text-sm">Безопасная оплата</span>
+        </div>
+        
+        <h2 class="text-lg font-bold mb-4 text-center text-gray-700">Ввод данных карты</h2>
+        <p class="text-center text-blue-600 font-bold mb-6 text-xl">{{ amount }} ₸</p>
+
+        <form action="/simulate_success" method="post" class="space-y-4">
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">НОМЕР КАРТЫ</label>
+                <input type="text" placeholder="4444 4444 4444 4444" class="w-full border p-3 rounded-lg focus:border-blue-500 outline-none" required>
+            </div>
+            <div class="flex gap-4">
+                <div class="w-1/2">
+                    <label class="block text-xs text-gray-400 mb-1">СРОК ДЕЙСТВИЯ</label>
+                    <input type="text" placeholder="MM/YY" class="w-full border p-3 rounded-lg focus:border-blue-500 outline-none" required>
+                </div>
+                <div class="w-1/2">
+                    <label class="block text-xs text-gray-400 mb-1">CVC/CVV</label>
+                    <input type="password" placeholder="***" class="w-full border p-3 rounded-lg focus:border-blue-500 outline-none" required>
+                </div>
+            </div>
+            <button type="submit" class="w-full bg-blue-600 text-white font-bold py-4 rounded-lg mt-6 hover:bg-blue-700 transition-all">
+                ОПЛАТИТЬ {{ amount }} ₸
+            </button>
+        </form>
+        
+        <div class="mt-6 flex justify-center gap-4 opacity-30 grayscale">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" width="40">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" width="30">
+        </div>
+    </div>
+</body>
+</html>
