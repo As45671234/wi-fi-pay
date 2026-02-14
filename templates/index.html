@@ -21,9 +21,6 @@
         .mac-address { font-size: 0.75rem; color: #adb5bd; }
         #pay-button-container { display: none; animation: fadeIn 0.5s; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        
-        /* Стили для фрейма */
-        .payment-iframe { width: 100%; height: 600px; border: none; }
     </style>
 </head>
 <body>
@@ -91,32 +88,9 @@
     </div>
 </div>
 
-<!-- МОДАЛЬНОЕ ОКНО ДЛЯ ОПЛАТЫ -->
-<div class="modal fade" id="paymentModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
-  <div class="modal-dialog modal-dialog-centered modal-lg"> <!-- modal-lg делает окно пошире -->
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Безопасная оплата</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body p-0">
-        <div id="loader" class="text-center p-5">
-            <div class="spinner-border text-primary" role="status"></div>
-            <p class="mt-2">Соединение с банком...</p>
-        </div>
-        <iframe id="paymentFrame" class="payment-iframe" src="" style="display:none;"></iframe>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Скрипты -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     let selectedAmount = 0;
-    const paymentModal = new bootstrap.Modal(document.getElementById('paymentModal'));
-    const paymentFrame = document.getElementById('paymentFrame');
-    const loader = document.getElementById('loader');
 
     function selectTariff(element, amount, title) {
         document.querySelectorAll('.btn-tariff').forEach(btn => btn.classList.remove('active'));
@@ -126,33 +100,13 @@
         selectedAmount = amount;
     }
 
-    document.getElementById('btn-pay-action').onclick = function() {
-        // 1. Показываем модальное окно
-        paymentModal.show();
-        loader.style.display = 'block';
-        paymentFrame.style.display = 'none';
-
-        // 2. Данные
+    const payBtn = document.querySelector('#pay-button-container button');
+    payBtn.onclick = function() {
         const mac = "{{ mac|default('00:00:00:00:00:00') }}";
         const router = "{{ router_id|default('default') }}";
-
-        // 3. Запрашиваем ссылку у сервера (AJAX)
-        fetch(`/api/get_payment_url?mac=${mac}&amount=${selectedAmount}&router_id=${router}`)
-            .then(response => response.json())
-            .then(data => {
-                // 4. Открываем ссылку во фрейме
-                paymentFrame.src = data.payment_url;
-                
-                // Когда фрейм загрузится, убираем крутилку
-                paymentFrame.onload = function() {
-                    loader.style.display = 'none';
-                    paymentFrame.style.display = 'block';
-                };
-            })
-            .catch(error => {
-                alert("Ошибка соединения с сервером");
-                paymentModal.hide();
-            });
+        
+        // ПРОСТОЙ ПЕРЕХОД НА НОВУЮ СТРАНИЦУ
+        window.location.href = "/create_payment?mac=" + mac + "&amount=" + selectedAmount + "&router_id=" + router;
     };
 </script>
 
