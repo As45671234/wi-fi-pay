@@ -10,10 +10,7 @@
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; transition: all 0.2s; }
         .tariff-card.active { border-color: #3b82f6; background-color: #eff6ff; }
-        #pay-frame-overlay {
-            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); 
-            z-index: 100; align-items: center; justify-content: center;
-        }
+        #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
     </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4 text-gray-800">
@@ -23,75 +20,66 @@
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="20" r="1"></circle></svg>
         </div>
         <h1 class="text-xl font-bold mb-1">Высокоскоростной Wi-Fi</h1>
-        <p class="text-gray-400 text-sm mb-8 px-4">Оплата доступа к сети через Freedom Pay</p>
+        <p class="text-gray-400 text-sm mb-8 px-4 font-medium leading-tight">Выберите время доступа и оплатите картой любого банка</p>
 
-        <div class="space-y-3 mb-6">
-            <div onclick="selectTariff(100, this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
-                <span class="font-semibold">1 Час доступа</span>
-                <span class="font-bold text-lg">100 ₸</span>
+        <div class="space-y-3 mb-6 text-left">
+            <div onclick="selectT(100, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
+                <span class="font-semibold text-gray-700">1 Час доступа</span>
+                <span class="font-bold text-gray-900 text-lg">100 ₸</span>
             </div>
-            <div onclick="selectTariff(500, this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
-                <span class="font-semibold">Весь день</span>
-                <span class="font-bold text-lg">500 ₸</span>
+            <div onclick="selectT(500, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
+                <span class="font-semibold text-gray-700">Весь день</span>
+                <span class="font-bold text-gray-900 text-lg">500 ₸</span>
             </div>
         </div>
 
-        <div id="pay-box" style="display: none;" class="pt-4 border-t border-gray-50">
-            <button onclick="startPayment()" class="w-full bg-[#1c75ff] hover:bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-all">
-                ОПЛАТИТЬ <span id="btn-amount"></span> ₸
+        <div id="pay-btn-area" style="display: none;" class="pt-4 border-t border-gray-50">
+            <button onclick="payNow()" class="w-full bg-[#1c75ff] hover:bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-all">
+                ОПЛАТИТЬ <span id="amt-display"></span> ₸
             </button>
+            <div class="flex justify-center gap-6 mt-6 opacity-40">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" width="40">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" width="30">
+            </div>
         </div>
-        
         <div class="mt-8 text-[10px] text-gray-300 tracking-widest uppercase">ID: {{ mac }}</div>
     </div>
 
-    <!-- ТОТ САМЫЙ ФРЕЙМ -->
-    <div id="pay-frame-overlay" onclick="closePay()">
-        <div class="bg-white rounded-3xl overflow-hidden w-full max-w-[450px] h-[650px] shadow-2xl relative mx-4" onclick="event.stopPropagation()">
-            <button onclick="closePay()" class="absolute top-4 right-4 z-50 bg-gray-100 rounded-full w-8 h-8 flex items-center justify-center text-gray-500 hover:text-black">✕</button>
+    <!-- ВСПЛЫВАЮЩИЙ ФРЕЙМ -->
+    <div id="overlay" onclick="closeP()">
+        <div class="bg-white rounded-[2rem] overflow-hidden w-full max-w-[450px] h-[650px] shadow-2xl relative mx-4" onclick="event.stopPropagation()">
+            <button onclick="closeP()" class="absolute top-4 right-4 z-50 bg-gray-100 rounded-full w-8 h-8 flex items-center justify-center text-gray-400 hover:text-black">✕</button>
             <iframe id="pay-iframe" src="" class="w-full h-full border-none"></iframe>
         </div>
     </div>
 
-    <!-- Футер -->
-    <div class="mt-12 text-center text-[11px] text-gray-400">
-        <div class="font-bold text-gray-600 mb-2 uppercase tracking-widest">ИП КАЛКИЕВ</div>
-        <div class="flex justify-center space-x-6 text-blue-500 font-medium mb-4">
+    <div class="mt-12 text-center">
+        <div class="font-bold text-gray-600 text-[12px] mb-3 uppercase tracking-widest">ИП КАЛКИЕВ</div>
+        <div class="flex justify-center space-x-6 text-blue-500 text-[11px] font-medium mb-4">
             <a href="/payment_methods">Оплата и Возврат</a>
             <a href="/offer">Оферта</a>
             <a href="/privacy">Приватность</a>
         </div>
+        <div class="text-[10px] text-gray-400">sanatkalkiyev@gmail.com | © 2026 Wi-Fi Pay</div>
     </div>
 
     <script>
-        let selectedAmount = 0;
-
-        function selectTariff(amt, el) {
-            selectedAmount = amt;
+        let amt = 0;
+        function selectT(a, el) {
+            amt = a;
             document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
             el.classList.add('active');
-            document.getElementById('pay-box').style.display = 'block';
-            document.getElementById('btn-amount').innerText = amt;
+            document.getElementById('pay-btn-area').style.display = 'block';
+            document.getElementById('amt-display').innerText = a;
         }
-
-        async function startPayment() {
-            // Спрашиваем у нашего Python-сервера актуальную подписанную ссылку
-            const fd = new FormData();
-            fd.append('amount', selectedAmount);
-            fd.append('mac', "{{ mac }}");
-
-            const res = await fetch('/get_pay_link', { method: 'POST', body: fd });
-            const data = await res.json();
-
-            // Открываем полученную ссылку во ФРЕЙМЕ
-            document.getElementById('pay-iframe').src = data.url;
-            document.getElementById('pay-frame-overlay').style.display = 'flex';
+        async function payNow() {
+            const fd = new FormData(); fd.append('amount', amt); fd.append('mac', "{{ mac }}");
+            const r = await fetch('/get_pay_link', { method: 'POST', body: fd });
+            const d = await r.json();
+            document.getElementById('pay-iframe').src = d.url;
+            document.getElementById('overlay').style.display = 'flex';
         }
-
-        function closePay() {
-            document.getElementById('pay-frame-overlay').style.display = 'none';
-            document.getElementById('pay-iframe').src = "";
-        }
+        function closeP() { document.getElementById('overlay').style.display = 'none'; document.getElementById('pay-iframe').src = ""; }
     </script>
 </body>
 </html>
