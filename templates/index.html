@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wi-Fi Pay — Высокоскоростной интернет</title>
+    <title>Wi-Fi Pay — Оплата доступа</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        .tariff-card { transition: all 0.2s ease; cursor: pointer; }
-        .tariff-card.active { border-color: #3b82f6; border-width: 2px; }
+        .tariff-card { transition: all 0.2s ease; cursor: pointer; border-width: 2px; }
+        .tariff-card.active { border-color: #3b82f6; background-color: #f0f7ff; }
         .hidden-section { display: none; }
     </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4">
 
     <!-- Основная карточка -->
-    <div class="bg-white rounded-[2rem] shadow-sm p-8 w-full max-w-[440px] border border-gray-50">
+    <div class="bg-white rounded-[2.5rem] shadow-sm p-8 w-full max-w-[440px] border border-gray-100">
         
         <!-- Иконка Wi-Fi -->
         <div class="flex justify-center mb-4">
@@ -30,19 +30,19 @@
 
         <!-- Список тарифов -->
         <div class="space-y-3 mb-6">
-            <div onclick="selectTariff(100, this)" class="tariff-card flex items-center justify-between p-4 border border-gray-200 rounded-xl">
+            <div onclick="selectTariff(100, this)" class="tariff-card flex items-center justify-between p-4 border-gray-200 rounded-2xl">
                 <span class="font-semibold text-gray-800">1 Час доступа</span>
                 <span class="font-bold text-gray-900 text-lg">100 ₸</span>
             </div>
 
-            <div onclick="selectTariff(500, this)" class="tariff-card flex items-center justify-between p-4 border border-gray-200 rounded-xl">
+            <div onclick="selectTariff(500, this)" class="tariff-card flex items-center justify-between p-4 border-gray-200 rounded-2xl">
                 <span class="font-semibold text-gray-800">Весь день</span>
                 <span class="font-bold text-gray-900 text-lg">500 ₸</span>
             </div>
         </div>
 
-        <!-- Секция оплаты (появляется при выборе) -->
-        <div id="payment-section" class="hidden-section animate-fade-in">
+        <!-- Секция оплаты -->
+        <div id="payment-section" class="hidden-section">
             <div class="h-[1px] bg-gray-100 w-full mb-6"></div>
             
             <div class="flex justify-between items-center mb-6 px-1">
@@ -50,34 +50,36 @@
                 <span id="final-amount" class="text-xl font-bold text-gray-900">0 ₸</span>
             </div>
 
-            <button onclick="startPay()" class="w-full bg-[#1c75ff] hover:bg-blue-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-lg shadow-blue-100">
+            <button onclick="startPay()" id="pay-button" class="w-full bg-[#1c75ff] hover:bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 transition-colors shadow-lg shadow-blue-100">
                 <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
                 ОПЛАТИТЬ КАРТОЙ
             </button>
 
-            <div class="flex justify-center gap-4 mt-6 grayscale opacity-60">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/d/d6/Visa_2014_logo_detail.svg" height="15" width="40" alt="Visa">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" height="15" width="30" alt="Mastercard">
+            <!-- Исправленные логотипы Visa/Mastercard -->
+            <div class="flex justify-center items-center gap-6 mt-6 opacity-80">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" height="20" width="45" alt="Visa">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" height="20" width="35" alt="Mastercard">
             </div>
         </div>
 
         <div class="text-gray-300 text-[10px] text-center mt-8 uppercase tracking-widest">
-            ID: {{ mac }}
+            ID: <span id="id-display">{{ mac }}</span>
         </div>
     </div>
 
     <!-- Футер -->
     <div class="mt-12 w-full max-w-[440px] text-center">
-        <div class="h-[1px] bg-gray-200 w-full mb-6 opacity-50"></div>
-        <div class="text-gray-800 font-bold text-[12px] mb-3 uppercase tracking-wider text-center">ИП КАЛКИЕВ</div>
-        <div class="flex justify-center space-x-4 text-[11px] font-medium text-blue-500 mb-6">
+        <div class="h-[1px] bg-gray-200 w-full mb-6 opacity-40"></div>
+        <div class="text-gray-800 font-bold text-[12px] mb-3 uppercase tracking-wider">ИП КАЛКИЕВ</div>
+        <div class="flex justify-center space-x-6 text-[11px] font-medium text-blue-500 mb-8">
             <a href="/payment_methods">Оплата и Возврат</a>
             <a href="/offer">Оферта</a>
             <a href="/privacy">Приватность</a>
         </div>
-        <div class="text-gray-400 text-[10px] text-center">© 2026 Wi-Fi Pay.</div>
+        <div class="text-gray-400 text-[10px]">© 2026 Wi-Fi Pay.</div>
     </div>
 
+    <!-- SDK Freedom Pay (обязательно перед скриптом) -->
     <script src="https://api.paybox.money/js/pbox.js"></script>
     <script>
         let selectedAmount = 0;
@@ -92,14 +94,34 @@
         }
 
         async function startPay() {
-            const response = await fetch('/create_payment', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: `amount=${selectedAmount}&mac={{ mac }}&router_id={{ router_id }}`
-            });
-            const data = await response.json();
-            const paybox = new Paybox(data);
-            paybox.create();
+            const payButton = document.getElementById('pay-button');
+            payButton.innerText = "ЗАГРУЗКА...";
+            payButton.disabled = true;
+
+            try {
+                const formData = new FormData();
+                formData.append('amount', selectedAmount);
+                formData.append('mac', "{{ mac }}");
+                formData.append('router_id', "{{ router_id }}");
+
+                const response = await fetch('/create_payment', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error("Ошибка сервера");
+
+                const data = await response.json();
+
+                // Вызов ФРЕЙМА (Виджета)
+                const paybox = new Paybox(data);
+                paybox.create();
+            } catch (e) {
+                alert("Ошибка при создании платежа: " + e.message);
+            } finally {
+                payButton.innerText = "ОПЛАТИТЬ КАРТОЙ";
+                payButton.disabled = false;
+            }
         }
     </script>
 </body>
