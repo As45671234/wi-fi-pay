@@ -1,13 +1,45 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="p-8 max-w-2xl mx-auto text-gray-700 leading-relaxed text-sm">
-    <h1 class="text-2xl font-bold mb-6">Условия оплаты и возврата</h1>
-    <h2 class="font-bold mt-4">1. Порядок оплаты</h2>
-    <p class="mb-4">Оплата производится картами Visa/MasterCard через шлюз Freedom Pay. Услуга активируется сразу после оплаты.</p>
-    <h2 class="font-bold mt-4">2. Возврат</h2>
-    <p class="mb-4 text-red-600 font-medium">Согласно законодательству РК, цифровая услуга считается потребленной в момент предоставления доступа.</p>
-    <p>Для оформления возврата при техническом сбое пишите на <b>sanatkalkiyev@gmail.com</b>.</p>
-    <a href="/" class="inline-block mt-8 text-blue-500 font-bold underline">← Вернуться</a>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Оплата и Возврат — Wi-Fi Pay</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 p-6 sm:p-12 text-slate-700 leading-relaxed font-sans">
+    <div class="max-w-3xl mx-auto bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
+        <h1 class="text-2xl font-bold mb-8 text-slate-900 border-b pb-4 text-center">Условия оплаты и возврата</h1>
+
+        <section class="mb-8">
+            <h2 class="text-lg font-bold mb-3 text-slate-900">Способы оплаты</h2>
+            <p class="text-sm mb-4 text-slate-600">Оплата услуг Wi-Fi доступа осуществляется с использованием банковских карт <b>VISA</b> и <b>MasterCard</b> любого банка РК и мира.</p>
+            <div class="flex gap-4 opacity-60 mb-4">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" width="50">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" width="40">
+            </div>
+            <p class="text-sm text-slate-600 italic border-l-4 border-blue-500 pl-4 py-2">Транзакции защищены технологией 3D Secure. Платеж проводится через эквайринг Freedom Pay.</p>
+        </section>
+
+        <section class="mb-8 bg-amber-50 p-6 rounded-2xl border border-amber-100">
+            <h2 class="text-lg font-bold mb-3 text-amber-900">Условия возврата</h2>
+            <p class="text-sm text-amber-800 mb-4">Услуга предоставления доступа к Интернету является потребляемой в момент начала пользования. Согласно законодательству РК, право на возврат в течение 14 дней на данные услуги <b>не распространяется</b>.</p>
+            <p class="text-sm font-bold text-amber-900 mb-2">Возврат возможен только в следующих случаях:</p>
+            <ul class="list-disc list-inside text-sm text-amber-800 space-y-1">
+                <li>Технический сбой оборудования Исполнителя (услуга не предоставлена);</li>
+                <li>Ошибочное двойное списание средств за одну сессию.</li>
+            </ul>
+        </section>
+
+        <section class="mb-8">
+            <h2 class="text-lg font-bold mb-3 text-slate-900">Порядок оформления возврата</h2>
+            <p class="text-sm mb-4 font-medium">Для подачи заявки на возврат напишите нам на email:</p>
+            <p class="text-blue-600 font-bold mb-4">sanatkalkiyev@gmail.com</p>
+            <p class="text-xs text-slate-500">В письме укажите: дату платежа, сумму, последние 4 цифры карты и MAC-адрес устройства. Срок рассмотрения заявки — до 3 рабочих дней.</p>
+        </section>
+
+        <div class="text-center mt-10">
+            <a href="/" class="bg-blue-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-blue-700 transition-all">Вернуться к тарифам</a>
+        </div>
+    </div>
 </body>
 </html>
