@@ -173,7 +173,7 @@
 
                     if (data.url) {
                         // Редирект всего окна. Это позволит открыться ЛЮБОМУ банку и 3D-Secure СМС коду.
-                        window.location.replace(data.url);
+                        window.location.href = data.url;
                     } else {
                         alert("Ошибка получения ссылки");
                     }
@@ -181,7 +181,8 @@
                     alert("Ошибка сети");
                 } finally {
                     btn.disabled = false;
-                    btn.innerText = "ОПЛАТИТЬ " + selectedAmt + " ₸";
+                    btn.innerTex
+                    t = "ОПЛАТИТЬ " + selectedAmt + " ₸";
                 }
             }
         }
