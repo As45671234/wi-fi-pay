@@ -60,30 +60,55 @@
         <div class="text-[10px] text-gray-400">© 2026 Wi-Fi Pay.</div>
     </div>
 
-    <!-- SDK FREEDOM PAY -->
-    <script src="https://api.paybox.money/js/pbox.js"></script>
     <script>
         let selectedAmount = 0;
+
         function selectTariff(amt, desc, el) {
             selectedAmount = amt;
+            // Убираем класс active у всех
             document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
+            // Добавляем текущему
             el.classList.add('active');
-            if(amt > 0) {
-                document.getElementById('pay-box').style.display = 'block';
+            
+            const payBox = document.getElementById('pay-box');
+            if (amt > 0) {
+                payBox.style.display = 'block';
                 document.getElementById('btn-amount').innerText = amt;
             } else {
-                document.getElementById('pay-box').style.display = 'none';
+                payBox.style.display = 'none';
+                // Тут можно добавить вызов бесплатного доступа, если нужно
             }
         }
 
         async function startPayment() {
-            const fd = new FormData();
-            fd.append('amount', selectedAmount);
-            fd.append('mac', "{{ mac }}");
-            const res = await fetch('/get_pay_link', { method: 'POST', body: fd });
-            const data = await res.json();
-            const paybox = new Paybox(data);
-            paybox.create();
+            if (selectedAmount <= 0) return;
+
+            const btn = document.querySelector('button[onclick="startPayment()"]');
+            btn.innerText = "ЗАГРУЗКА...";
+            btn.disabled = true;
+
+            try {
+                const fd = new FormData();
+                fd.append('amount', selectedAmount);
+                fd.append('mac', "{{ mac }}");
+
+                const res = await fetch('/get_pay_link', { method: 'POST', body: fd });
+                const data = await res.json();
+
+                if (data.url) {
+                    // Используем штатный способ открытия виджета Freedom Pay
+                    const paybox = new Paybox(data);
+                    paybox.create();
+                } else {
+                    alert("Ошибка получения ссылки оплаты");
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Ошибка связи с сервером");
+            } finally {
+                btn.innerText = "ОПЛАТИТЬ " + selectedAmount + " ₸";
+                btn.disabled = false;
+            }
         }
     </script>
 </body>
