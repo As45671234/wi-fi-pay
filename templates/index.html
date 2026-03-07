@@ -173,7 +173,7 @@
 
                     if (data.url) {
                         // Редирект всего окна. Это позволит открыться ЛЮБОМУ банку и 3D-Secure СМС коду.
-                        window.location.href = data.url;
+                        window.location.replace(data.url);
                     } else {
                         alert("Ошибка получения ссылки");
                     }
