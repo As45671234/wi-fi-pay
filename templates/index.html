@@ -4,29 +4,41 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Wi-Fi Pay</title>
-    <!-- ВШИТЫЕ СТИЛИ (Больше не нужен внешний Tailwind) -->
     <style>
+        /* Полностью автономные стили (без внешних библиотек) */
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; color: #1f2937; }
-        .card { background: #ffffff; border-radius: 2rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); padding: 2rem; width: 90%; max-width: 420px; text-align: center; border: 1px solid #f1f5f9; margin-bottom: 2rem; }
+        .card { background: #ffffff; border-radius: 2.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.05); padding: 2rem; width: 85%; max-width: 420px; text-align: center; border: 1px solid #f1f5f9; }
         .icon { color: #3b82f6; margin-bottom: 1rem; display: flex; justify-content: center; }
-        h1 { font-size: 1.25rem; font-weight: bold; margin: 0 0 0.5rem 0; }
-        .desc { color: #9ca3af; font-size: 0.875rem; margin-bottom: 1.5rem; }
+        h1 { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.5rem 0; color: #111827; }
+        .desc { color: #9ca3af; font-size: 0.875rem; margin-bottom: 2rem; padding: 0 10px; line-height: 1.3; }
+        
         .tariff-list { text-align: left; margin-bottom: 1.5rem; }
-        .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; padding: 1.25rem; border-radius: 1rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s; }
-        .tariff-card.active { border-color: #3b82f6; background-color: #eff6ff; }
-        .t-name { font-weight: 600; color: #374151; font-size: 1rem; }
-        .t-price { font-weight: 700; color: #111827; font-size: 1.125rem; }
-        #pay-box { display: none; border-top: 1px solid #f1f5f9; padding-top: 1rem; }
-        .btn { background-color: #3b82f6; color: white; border: none; width: 100%; padding: 1rem; border-radius: 1rem; font-size: 1rem; font-weight: bold; cursor: pointer; box-shadow: 0 10px 15px -3px rgba(59,130,246,0.3); }
-        .mac-id { font-size: 0.65rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
-        .footer { text-align: center; font-size: 0.75rem; color: #9ca3af; }
-        .f-title { font-weight: bold; color: #4b5563; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.8rem;}
-        .f-links { margin-bottom: 1rem; display: flex; justify-content: center; gap: 1rem; }
-        .f-links a { color: #3b82f6; text-decoration: none; font-weight: 500; }
-        .f-links a:hover { text-decoration: underline; }
-        #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
-        .iframe-wrap { background: white; border-radius: 1.5rem; width: 95%; max-width: 450px; height: 80vh; max-height: 650px; position: relative; overflow: hidden; }
-        .close-btn { position: absolute; top: 10px; right: 10px; background: #f3f4f6; border: none; border-radius: 50%; width: 30px; height: 30px; font-size: 16px; cursor: pointer; color: #6b7280; z-index: 10; }
+        .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; padding: 1.2rem; border-radius: 1.2rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s ease; }
+        .tariff-card:active { transform: scale(0.98); }
+        .tariff-card.active { border-color: #3b82f6; background-color: #f0f7ff; }
+        
+        .t-name { font-weight: 600; color: #374151; font-size: 0.95rem; }
+        .t-price { font-weight: 700; color: #111827; font-size: 1.1rem; }
+        
+        #pay-btn-area { display: none; border-top: 1px solid #f1f5f9; padding-top: 1.5rem; margin-top: 1rem; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
+        .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
+        
+        .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
+        
+        .footer { margin-top: 2rem; text-align: center; width: 100%; max-width: 420px; }
+        .f-line { height: 1px; background: #e5e7eb; margin-bottom: 1.5rem; width: 100%; }
+        .f-title { font-weight: 700; color: #4b5563; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem;}
+        .f-links { margin-bottom: 1rem; display: flex; justify-content: center; gap: 15px; }
+        .f-links a { color: #3b82f6; text-decoration: none; font-weight: 600; font-size: 0.75rem; }
+        .f-email { font-size: 0.75rem; color: #9ca3af; margin-top: 0.5rem; }
+
+        /* Стили для фрейма */
+        #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .iframe-container { background: white; border-radius: 2rem; width: 95%; max-width: 450px; height: 85vh; position: relative; overflow: hidden; }
+        .close-pay { position: absolute; top: 15px; right: 15px; background: #f3f4f6; border: none; border-radius: 50%; width: 35px; height: 35px; font-size: 18px; font-weight: bold; color: #4b5563; z-index: 1010; cursor: pointer; }
         iframe { width: 100%; height: 100%; border: none; }
     </style>
 </head>
@@ -34,153 +46,152 @@
 
     <div class="card">
         <div class="icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="20" r="1"></circle></svg>
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                <line x1="12" y1="20" x2="12.01" y2="20"></line>
+            </svg>
         </div>
         <h1>Высокоскоростной Wi-Fi</h1>
-        <p class="desc">Выберите время доступа и оплатите картой</p>
+        <p class="desc">Выберите время доступа и оплатите картой любого банка</p>
 
         <div class="tariff-list">
+            <!-- 15 минут бесплатно -->
             <div onclick="selectT(0, this)" class="tariff-card">
                 <span class="t-name">15 минут бесплатно</span>
                 <span class="t-price">0 ₸</span>
             </div>
+            <!-- 1 час -->
             <div onclick="selectT(490, this)" class="tariff-card">
                 <span class="t-name">1 час доступа</span>
                 <span class="t-price">490 ₸</span>
             </div>
+            <!-- 3 часа -->
             <div onclick="selectT(990, this)" class="tariff-card">
                 <span class="t-name">3 часа доступа</span>
                 <span class="t-price">990 ₸</span>
             </div>
+            <!-- Безлимит на день -->
             <div onclick="selectT(2490, this)" class="tariff-card">
                 <span class="t-name">Безлимит на день</span>
                 <span class="t-price">2490 ₸</span>
             </div>
         </div>
 
-        <div id="pay-box">
-            <button class="btn" onclick="payNow()">ОПЛАТИТЬ <span id="amt-display"></span> ₸</button>
+        <div id="pay-btn-area">
+            <button class="btn" id="main-pay-btn" onclick="payNow()">ОПЛАТИТЬ <span id="amt-display"></span> ₸</button>
         </div>
         
         <div class="mac-id">ID: {{ mac }}</div>
     </div>
 
-    <!-- ВСПЛЫВАЮЩИЙ ФРЕЙМ -->
+    <!-- ВСПЛЫВАЮЩИЙ ФРЕЙМ ОПЛАТЫ -->
     <div id="overlay" onclick="closeP()">
-        <div class="iframe-wrap" onclick="event.stopPropagation()">
-            <button class="close-btn" onclick="closeP()">✕</button>
+        <div class="iframe-container" onclick="event.stopPropagation()">
+            <button class="close-pay" onclick="closeP()">✕</button>
             <iframe id="pay-iframe" src=""></iframe>
         </div>
     </div>
 
+    <!-- ФУТЕР -->
     <div class="footer">
+        <div class="f-line"></div>
         <div class="f-title">ИП КАЛКИЕВ</div>
         <div class="f-links">
             <a href="/payment_methods">Оплата и Возврат</a>
             <a href="/offer">Оферта</a>
             <a href="/privacy">Приватность</a>
         </div>
-        <div>sanatkalkiyev@gmail.com | © 2026 Wi-Fi Pay</div>
+        <div class="f-email">sanatkalkiyev@gmail.com | © 2026 Wi-Fi Pay</div>
     </div>
 
-    <!-- SDK БАНКА -->
-    <script src="https://api.paybox.money/js/pbox.js"></script>
     <script>
-    let selectedAmount = 0;
+        let selectedAmt = -1;
 
-    // 1. Выбор тарифа
-    function selectT(amount, element) {
-        selectedAmount = amount;
-        
-        // Визуальное выделение карточки
-        document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
-        element.classList.add('active');
-        
-        // Показываем блок с кнопкой
-        document.getElementById('pay-btn-area').style.display = 'block';
-        
-        // Меняем текст на кнопке
-        const btnDisplay = document.getElementById('amt-display');
-        if (amount === 0) {
-            btnDisplay.innerText = "БЕСПЛАТНО";
-        } else {
-            btnDisplay.innerText = amount;
-        }
-    }
-
-    // 2. Основная функция при нажатии на кнопку "ОПЛАТИТЬ"
-    async function payNow() {
-        const mac = "{{ mac }}";
-        const btn = document.querySelector('#pay-btn-area button');
-        
-        // Блокируем кнопку на время загрузки
-        btn.disabled = true;
-        btn.innerText = "ПОДОЖДИТЕ...";
-
-        if (selectedAmount === 0) {
-            // --- ЛОГИКА БЕСПЛАТНОГО ДОСТУПА ---
-            try {
-                const fd = new FormData();
-                fd.append('mac', mac);
-
-                const response = await fetch('/get_free_access', {
-                    method: 'POST',
-                    body: fd
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    // Если сервер разрешил, перекидываем на страницу успеха
-                    window.location.href = "/success";
-                } else {
-                    // Если уже использовали (403 ошибка)
-                    alert(data.error || "Ошибка доступа");
-                    btn.disabled = false;
-                    btn.innerText = "ОПЛАТИТЬ";
-                }
-            } catch (e) {
-                alert("Ошибка связи с сервером");
-                btn.disabled = false;
-                btn.innerText = "ОПЛАТИТЬ";
-            }
-
-        } else {
-            // --- ЛОГИКА ПЛАТНОГО ДОСТУПА (FREEDOM PAY) ---
-            try {
-                const fd = new FormData();
-                fd.append('amount', selectedAmount);
-                fd.append('mac', mac);
-
-                const response = await fetch('/get_pay_link', {
-                    method: 'POST',
-                    body: fd
-                });
-
-                const data = await response.json();
-
-                if (data.url) {
-                    // Открываем ссылку банка в нашем фрейме (Iframe)
-                    document.getElementById('pay-iframe').src = data.url;
-                    document.getElementById('overlay').style.display = 'flex';
-                    
-                    // Возвращаем кнопку в исходное состояние
-                    btn.disabled = false;
-                    btn.innerText = "ОПЛАТИТЬ " + selectedAmount + " ₸";
-                }
-            } catch (e) {
-                alert("Ошибка получения ссылки на оплату");
-                btn.disabled = false;
-                btn.innerText = "ОПЛАТИТЬ";
+        // Функция выбора тарифа
+        function selectT(amount, element) {
+            selectedAmt = amount;
+            
+            // Убираем активный класс у всех карточек
+            const cards = document.querySelectorAll('.tariff-card');
+            cards.forEach(card => card.classList.remove('active'));
+            
+            // Добавляем активный класс текущей
+            element.classList.add('active');
+            
+            // Показываем кнопку
+            const btnArea = document.getElementById('pay-btn-area');
+            const amtLabel = document.getElementById('amt-display');
+            btnArea.style.display = 'block';
+            
+            if (amount === 0) {
+                amtLabel.innerText = "БЕСПЛАТНО";
+            } else {
+                amtLabel.innerText = amount;
             }
         }
-    }
 
-    // Закрытие фрейма
-    function closeP() {
-        document.getElementById('overlay').style.display = 'none';
-        document.getElementById('pay-iframe').src = "";
-    }
-</script>
+        // Функция оплаты / активации
+        async function payNow() {
+            if (selectedAmt < 0) return;
+
+            const btn = document.getElementById('main-pay-btn');
+            btn.disabled = true;
+            btn.innerText = "ПОДОЖДИТЕ...";
+
+            const macAddress = "{{ mac }}";
+
+            if (selectedAmt === 0) {
+                // БЕСПЛАТНЫЙ ТАРИФ
+                try {
+                    const fd = new FormData();
+                    fd.append('mac', macAddress);
+                    const response = await fetch('/get_free_access', { method: 'POST', body: fd });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        window.location.href = "/success";
+                    } else {
+                        alert(data.error || "Ошибка активации");
+                        btn.disabled = false;
+                        btn.innerText = "ОПЛАТИТЬ 0 ₸";
+                    }
+                } catch (e) {
+                    alert("Ошибка связи с сервером");
+                    btn.disabled = false;
+                }
+            } else {
+                // ПЛАТНЫЙ ТАРИФ
+                try {
+                    const fd = new FormData();
+                    fd.append('amount', selectedAmt);
+                    fd.append('mac', macAddress);
+
+                    const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
+                    const data = await response.json();
+
+                    if (data.url) {
+                        const ifr = document.getElementById('pay-iframe');
+                        ifr.src = data.url;
+                        document.getElementById('overlay').style.display = 'flex';
+                    } else {
+                        alert("Ошибка получения ссылки");
+                    }
+                } catch (e) {
+                    alert("Ошибка сети");
+                } finally {
+                    btn.disabled = false;
+                    btn.innerText = "ОПЛАТИТЬ " + selectedAmt + " ₸";
+                }
+            }
+        }
+
+        // Закрытие фрейма
+        function closeP() {
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('pay-iframe').src = "";
+        }
+    </script>
 </body>
 </html>
