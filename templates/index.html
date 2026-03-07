@@ -22,14 +22,23 @@
         <h1 class="text-xl font-bold mb-1">Высокоскоростной Wi-Fi</h1>
         <p class="text-gray-400 text-sm mb-8 px-4 font-medium leading-tight">Выберите время доступа и оплатите картой любого банка</p>
 
+        <!-- ТАРИФЫ -->
         <div class="space-y-3 mb-6 text-left">
-            <div onclick="selectT(100, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
-                <span class="font-semibold text-gray-700">1 Час доступа</span>
-                <span class="font-bold text-gray-900 text-lg">100 ₸</span>
+            <div onclick="selectT(0, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
+                <span class="font-semibold text-gray-700">15 минут бесплатно</span>
+                <span class="font-bold text-gray-900 text-lg">0 ₸</span>
             </div>
-            <div onclick="selectT(500, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
-                <span class="font-semibold text-gray-700">Весь день</span>
-                <span class="font-bold text-gray-900 text-lg">500 ₸</span>
+            <div onclick="selectT(490, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
+                <span class="font-semibold text-gray-700">1 час доступа</span>
+                <span class="font-bold text-gray-900 text-lg">490 ₸</span>
+            </div>
+            <div onclick="selectT(990, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
+                <span class="font-semibold text-gray-700">3 часа доступа</span>
+                <span class="font-bold text-gray-900 text-lg">990 ₸</span>
+            </div>
+            <div onclick="selectT(2490, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
+                <span class="font-semibold text-gray-700">Безлимит на день</span>
+                <span class="font-bold text-gray-900 text-lg">2490 ₸</span>
             </div>
         </div>
 
@@ -69,10 +78,16 @@
             amt = a;
             document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
             el.classList.add('active');
-            document.getElementById('pay-btn-area').style.display = 'block';
-            document.getElementById('amt-display').innerText = a;
+            
+            if (amt > 0) {
+                document.getElementById('pay-btn-area').style.display = 'block';
+                document.getElementById('amt-display').innerText = a;
+            } else {
+                document.getElementById('pay-btn-area').style.display = 'none';
+            }
         }
         async function payNow() {
+            if (amt === 0) return;
             const fd = new FormData(); fd.append('amount', amt); fd.append('mac', "{{ mac }}");
             const r = await fetch('/get_pay_link', { method: 'POST', body: fd });
             const d = await r.json();
