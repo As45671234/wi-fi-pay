@@ -172,9 +172,8 @@
                     const data = await response.json();
 
                     if (data.url) {
-                        const ifr = document.getElementById('pay-iframe');
-                        ifr.src = data.url;
-                        document.getElementById('overlay').style.display = 'flex';
+                        // Редирект всего окна. Это позволит открыться ЛЮБОМУ банку и 3D-Secure СМС коду.
+                        window.location.href = data.url;
                     } else {
                         alert("Ошибка получения ссылки");
                     }
