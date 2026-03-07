@@ -2,76 +2,89 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Wi-Fi Pay</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- ВШИТЫЕ СТИЛИ (Больше не нужен внешний Tailwind) -->
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; transition: all 0.2s; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; color: #1f2937; }
+        .card { background: #ffffff; border-radius: 2rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); padding: 2rem; width: 90%; max-width: 420px; text-align: center; border: 1px solid #f1f5f9; margin-bottom: 2rem; }
+        .icon { color: #3b82f6; margin-bottom: 1rem; display: flex; justify-content: center; }
+        h1 { font-size: 1.25rem; font-weight: bold; margin: 0 0 0.5rem 0; }
+        .desc { color: #9ca3af; font-size: 0.875rem; margin-bottom: 1.5rem; }
+        .tariff-list { text-align: left; margin-bottom: 1.5rem; }
+        .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; padding: 1.25rem; border-radius: 1rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s; }
         .tariff-card.active { border-color: #3b82f6; background-color: #eff6ff; }
-        #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+        .t-name { font-weight: 600; color: #374151; font-size: 1rem; }
+        .t-price { font-weight: 700; color: #111827; font-size: 1.125rem; }
+        #pay-box { display: none; border-top: 1px solid #f1f5f9; padding-top: 1rem; }
+        .btn { background-color: #3b82f6; color: white; border: none; width: 100%; padding: 1rem; border-radius: 1rem; font-size: 1rem; font-weight: bold; cursor: pointer; box-shadow: 0 10px 15px -3px rgba(59,130,246,0.3); }
+        .mac-id { font-size: 0.65rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
+        .footer { text-align: center; font-size: 0.75rem; color: #9ca3af; }
+        .f-title { font-weight: bold; color: #4b5563; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.8rem;}
+        .f-links { margin-bottom: 1rem; display: flex; justify-content: center; gap: 1rem; }
+        .f-links a { color: #3b82f6; text-decoration: none; font-weight: 500; }
+        .f-links a:hover { text-decoration: underline; }
+        #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+        .iframe-wrap { background: white; border-radius: 1.5rem; width: 95%; max-width: 450px; height: 80vh; max-height: 650px; position: relative; overflow: hidden; }
+        .close-btn { position: absolute; top: 10px; right: 10px; background: #f3f4f6; border: none; border-radius: 50%; width: 30px; height: 30px; font-size: 16px; cursor: pointer; color: #6b7280; z-index: 10; }
+        iframe { width: 100%; height: 100%; border: none; }
     </style>
 </head>
-<body class="flex flex-col items-center justify-center min-h-screen p-4 text-gray-800">
+<body>
 
-    <div class="bg-white rounded-[2.5rem] shadow-sm p-8 w-full max-w-[420px] border border-gray-100 text-center">
-        <div class="flex justify-center mb-4 text-blue-500">
+    <div class="card">
+        <div class="icon">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="20" r="1"></circle></svg>
         </div>
-        <h1 class="text-xl font-bold mb-1">Высокоскоростной Wi-Fi</h1>
-        <p class="text-gray-400 text-sm mb-8 px-4 font-medium leading-tight">Выберите время доступа и оплатите картой любого банка</p>
+        <h1>Высокоскоростной Wi-Fi</h1>
+        <p class="desc">Выберите время доступа и оплатите картой</p>
 
-        <!-- ТАРИФЫ -->
-        <div class="space-y-3 mb-6 text-left">
-            <div onclick="selectT(0, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
-                <span class="font-semibold text-gray-700">15 минут бесплатно</span>
-                <span class="font-bold text-gray-900 text-lg">0 ₸</span>
+        <div class="tariff-list">
+            <div onclick="selectT(0, this)" class="tariff-card">
+                <span class="t-name">15 минут бесплатно</span>
+                <span class="t-price">0 ₸</span>
             </div>
-            <div onclick="selectT(490, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
-                <span class="font-semibold text-gray-700">1 час доступа</span>
-                <span class="font-bold text-gray-900 text-lg">490 ₸</span>
+            <div onclick="selectT(490, this)" class="tariff-card">
+                <span class="t-name">1 час доступа</span>
+                <span class="t-price">490 ₸</span>
             </div>
-            <div onclick="selectT(990, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
-                <span class="font-semibold text-gray-700">3 часа доступа</span>
-                <span class="font-bold text-gray-900 text-lg">990 ₸</span>
+            <div onclick="selectT(990, this)" class="tariff-card">
+                <span class="t-name">3 часа доступа</span>
+                <span class="t-price">990 ₸</span>
             </div>
-            <div onclick="selectT(2490, this)" class="tariff-card flex items-center justify-between p-5 rounded-2xl">
-                <span class="font-semibold text-gray-700">Безлимит на день</span>
-                <span class="font-bold text-gray-900 text-lg">2490 ₸</span>
+            <div onclick="selectT(2490, this)" class="tariff-card">
+                <span class="t-name">Безлимит на день</span>
+                <span class="t-price">2490 ₸</span>
             </div>
         </div>
 
-        <div id="pay-btn-area" style="display: none;" class="pt-4 border-t border-gray-50">
-            <button onclick="payNow()" class="w-full bg-[#1c75ff] hover:bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-all">
-                ОПЛАТИТЬ <span id="amt-display"></span> ₸
-            </button>
-            <div class="flex justify-center gap-6 mt-6 opacity-40">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" width="40">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" width="30">
-            </div>
+        <div id="pay-box">
+            <button class="btn" onclick="payNow()">ОПЛАТИТЬ <span id="amt-display"></span> ₸</button>
         </div>
-        <div class="mt-8 text-[10px] text-gray-300 tracking-widest uppercase">ID: {{ mac }}</div>
+        
+        <div class="mac-id">ID: {{ mac }}</div>
     </div>
 
     <!-- ВСПЛЫВАЮЩИЙ ФРЕЙМ -->
     <div id="overlay" onclick="closeP()">
-        <div class="bg-white rounded-[2rem] overflow-hidden w-full max-w-[450px] h-[650px] shadow-2xl relative mx-4" onclick="event.stopPropagation()">
-            <button onclick="closeP()" class="absolute top-4 right-4 z-50 bg-gray-100 rounded-full w-8 h-8 flex items-center justify-center text-gray-400 hover:text-black">✕</button>
-            <iframe id="pay-iframe" src="" class="w-full h-full border-none"></iframe>
+        <div class="iframe-wrap" onclick="event.stopPropagation()">
+            <button class="close-btn" onclick="closeP()">✕</button>
+            <iframe id="pay-iframe" src=""></iframe>
         </div>
     </div>
 
-    <div class="mt-12 text-center">
-        <div class="font-bold text-gray-600 text-[12px] mb-3 uppercase tracking-widest">ИП КАЛКИЕВ</div>
-        <div class="flex justify-center space-x-6 text-blue-500 text-[11px] font-medium mb-4">
+    <div class="footer">
+        <div class="f-title">ИП КАЛКИЕВ</div>
+        <div class="f-links">
             <a href="/payment_methods">Оплата и Возврат</a>
             <a href="/offer">Оферта</a>
             <a href="/privacy">Приватность</a>
         </div>
-        <div class="text-[10px] text-gray-400">sanatkalkiyev@gmail.com | © 2026 Wi-Fi Pay</div>
+        <div>sanatkalkiyev@gmail.com | © 2026 Wi-Fi Pay</div>
     </div>
 
+    <!-- SDK БАНКА -->
+    <script src="https://api.paybox.money/js/pbox.js"></script>
     <script>
         let amt = 0;
         function selectT(a, el) {
@@ -80,10 +93,10 @@
             el.classList.add('active');
             
             if (amt > 0) {
-                document.getElementById('pay-btn-area').style.display = 'block';
+                document.getElementById('pay-box').style.display = 'block';
                 document.getElementById('amt-display').innerText = a;
             } else {
-                document.getElementById('pay-btn-area').style.display = 'none';
+                document.getElementById('pay-box').style.display = 'none';
             }
         }
         async function payNow() {
