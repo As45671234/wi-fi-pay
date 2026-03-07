@@ -2,15 +2,13 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wi-Fi Pay — Выберите тариф</title>
+    <title>Wi-Fi Pay</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; transition: all 0.2s; }
-        .tariff-card.active { border-color: #3b82f6; background-color: #eff6ff; }
-        #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+        .tariff-card.active { border-color: #3b82f6; background-color: #eff6ff; border-width: 2px; }
     </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4 text-gray-800">
@@ -20,24 +18,24 @@
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><circle cx="12" cy="20" r="1"></circle></svg>
         </div>
         <h1 class="text-xl font-bold mb-1">Высокоскоростной Wi-Fi</h1>
-        <p class="text-gray-400 text-sm mb-8 px-4 font-medium">Выберите время доступа и оплатите картой</p>
+        <p class="text-gray-400 text-sm mb-8 px-4">Выберите время доступа и оплатите картой</p>
 
-        <!-- ТАРИФЫ -->
+        <!-- Тарифы -->
         <div class="space-y-3 mb-6 text-left">
-            <div onclick="selectTariff(0, 'Бесплатный доступ', this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
-                <span class="font-semibold text-gray-800">15 минут бесплатно</span>
+            <div onclick="selectTariff(0, '15 минут бесплатно', this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
+                <span class="font-semibold">15 минут бесплатно</span>
                 <span class="font-bold text-gray-900">0 ₸</span>
             </div>
-            <div onclick="selectTariff(490, 'Доступ на 1 час', this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
-                <span class="font-semibold text-gray-800">1 час доступа</span>
+            <div onclick="selectTariff(490, '1 час доступа', this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
+                <span class="font-semibold">1 час доступа</span>
                 <span class="font-bold text-gray-900">490 ₸</span>
             </div>
-            <div onclick="selectTariff(990, 'Доступ на 3 часа', this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
-                <span class="font-semibold text-gray-800">3 часа доступа</span>
+            <div onclick="selectTariff(990, '3 часа доступа', this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
+                <span class="font-semibold">3 часа доступа</span>
                 <span class="font-bold text-gray-900">990 ₸</span>
             </div>
             <div onclick="selectTariff(2490, 'Безлимит на день', this)" class="tariff-card flex items-center justify-between p-4 rounded-2xl">
-                <span class="font-semibold text-gray-800">Безлимит на день</span>
+                <span class="font-semibold">Безлимит на день</span>
                 <span class="font-bold text-gray-900">2490 ₸</span>
             </div>
         </div>
@@ -51,53 +49,42 @@
         <div class="mt-8 text-[10px] text-gray-300 tracking-widest uppercase">ID: {{ mac }}</div>
     </div>
 
-    <!-- ФРЕЙМ ОПЛАТЫ -->
-    <div id="overlay" onclick="closeP()">
-        <div class="bg-white rounded-3xl overflow-hidden w-full max-w-[450px] h-[650px] shadow-2xl relative mx-4" onclick="event.stopPropagation()">
-            <button onclick="closeP()" class="absolute top-4 right-4 z-50 bg-gray-100 rounded-full w-8 h-8 flex items-center justify-center text-gray-500 hover:text-black">✕</button>
-            <iframe id="pay-iframe" src="" class="w-full h-full border-none"></iframe>
+    <!-- ФУТЕР С ЮРИДИЧЕСКИМИ ССЫЛКАМИ -->
+    <div class="mt-12 text-center">
+        <div class="font-bold text-gray-600 text-[12px] mb-3 uppercase tracking-widest">ИП КАЛКИЕВ</div>
+        <div class="flex justify-center space-x-6 text-blue-500 text-[11px] font-medium mb-4">
+            <a href="/payment_methods" class="hover:underline">Оплата и Возврат</a>
+            <a href="/offer" class="hover:underline">Оферта</a>
+            <a href="/privacy" class="hover:underline">Приватность</a>
         </div>
+        <div class="text-[10px] text-gray-400">© 2026 Wi-Fi Pay.</div>
     </div>
 
+    <!-- SDK FREEDOM PAY -->
+    <script src="https://api.paybox.money/js/pbox.js"></script>
     <script>
         let selectedAmount = 0;
-        let selectedDesc = "";
-
         function selectTariff(amt, desc, el) {
             selectedAmount = amt;
-            selectedDesc = desc;
             document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
             el.classList.add('active');
-            
-            if (amt === 0) {
-                // Если бесплатно, логика включения будет другой (через IP Bindings сразу)
-                document.getElementById('pay-box').style.display = 'block';
-                document.getElementById('btn-amount').innerText = "БЕСПЛАТНО";
-            } else {
+            if(amt > 0) {
                 document.getElementById('pay-box').style.display = 'block';
                 document.getElementById('btn-amount').innerText = amt;
+            } else {
+                document.getElementById('pay-box').style.display = 'none';
             }
         }
 
         async function startPayment() {
-            if (selectedAmount === 0) {
-                // ТУТ БУДЕТ ВЫЗОВ НАШЕГО СЕРВЕРА ДЛЯ ВКЛЮЧЕНИЯ БЕСПЛАТНОГО ДОСТУПА
-                alert("Бесплатный доступ активирован!");
-                return;
-            }
-
             const fd = new FormData();
             fd.append('amount', selectedAmount);
             fd.append('mac', "{{ mac }}");
-
             const res = await fetch('/get_pay_link', { method: 'POST', body: fd });
             const data = await res.json();
-
-            document.getElementById('pay-iframe').src = data.url;
-            document.getElementById('overlay').style.display = 'flex';
+            const paybox = new Paybox(data);
+            paybox.create();
         }
-
-        function closeP() { document.getElementById('overlay').style.display = 'none'; document.getElementById('pay-iframe').src = ""; }
     </script>
 </body>
 </html>
