@@ -86,28 +86,101 @@
     <!-- SDK БАНКА -->
     <script src="https://api.paybox.money/js/pbox.js"></script>
     <script>
-        let amt = 0;
-        function selectT(a, el) {
-            amt = a;
-            document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
-            el.classList.add('active');
-            
-            if (amt > 0) {
-                document.getElementById('pay-box').style.display = 'block';
-                document.getElementById('amt-display').innerText = a;
-            } else {
-                document.getElementById('pay-box').style.display = 'none';
+    let selectedAmount = 0;
+
+    // 1. Выбор тарифа
+    function selectT(amount, element) {
+        selectedAmount = amount;
+        
+        // Визуальное выделение карточки
+        document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('active'));
+        element.classList.add('active');
+        
+        // Показываем блок с кнопкой
+        document.getElementById('pay-btn-area').style.display = 'block';
+        
+        // Меняем текст на кнопке
+        const btnDisplay = document.getElementById('amt-display');
+        if (amount === 0) {
+            btnDisplay.innerText = "БЕСПЛАТНО";
+        } else {
+            btnDisplay.innerText = amount;
+        }
+    }
+
+    // 2. Основная функция при нажатии на кнопку "ОПЛАТИТЬ"
+    async function payNow() {
+        const mac = "{{ mac }}";
+        const btn = document.querySelector('#pay-btn-area button');
+        
+        // Блокируем кнопку на время загрузки
+        btn.disabled = true;
+        btn.innerText = "ПОДОЖДИТЕ...";
+
+        if (selectedAmount === 0) {
+            // --- ЛОГИКА БЕСПЛАТНОГО ДОСТУПА ---
+            try {
+                const fd = new FormData();
+                fd.append('mac', mac);
+
+                const response = await fetch('/get_free_access', {
+                    method: 'POST',
+                    body: fd
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Если сервер разрешил, перекидываем на страницу успеха
+                    window.location.href = "/success";
+                } else {
+                    // Если уже использовали (403 ошибка)
+                    alert(data.error || "Ошибка доступа");
+                    btn.disabled = false;
+                    btn.innerText = "ОПЛАТИТЬ";
+                }
+            } catch (e) {
+                alert("Ошибка связи с сервером");
+                btn.disabled = false;
+                btn.innerText = "ОПЛАТИТЬ";
+            }
+
+        } else {
+            // --- ЛОГИКА ПЛАТНОГО ДОСТУПА (FREEDOM PAY) ---
+            try {
+                const fd = new FormData();
+                fd.append('amount', selectedAmount);
+                fd.append('mac', mac);
+
+                const response = await fetch('/get_pay_link', {
+                    method: 'POST',
+                    body: fd
+                });
+
+                const data = await response.json();
+
+                if (data.url) {
+                    // Открываем ссылку банка в нашем фрейме (Iframe)
+                    document.getElementById('pay-iframe').src = data.url;
+                    document.getElementById('overlay').style.display = 'flex';
+                    
+                    // Возвращаем кнопку в исходное состояние
+                    btn.disabled = false;
+                    btn.innerText = "ОПЛАТИТЬ " + selectedAmount + " ₸";
+                }
+            } catch (e) {
+                alert("Ошибка получения ссылки на оплату");
+                btn.disabled = false;
+                btn.innerText = "ОПЛАТИТЬ";
             }
         }
-        async function payNow() {
-            if (amt === 0) return;
-            const fd = new FormData(); fd.append('amount', amt); fd.append('mac', "{{ mac }}");
-            const r = await fetch('/get_pay_link', { method: 'POST', body: fd });
-            const d = await r.json();
-            document.getElementById('pay-iframe').src = d.url;
-            document.getElementById('overlay').style.display = 'flex';
-        }
-        function closeP() { document.getElementById('overlay').style.display = 'none'; document.getElementById('pay-iframe').src = ""; }
-    </script>
+    }
+
+    // Закрытие фрейма
+    function closeP() {
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('pay-iframe').src = "";
+    }
+</script>
 </body>
 </html>
