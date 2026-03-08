@@ -254,7 +254,7 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
 
-    payment_order_id = f"{int(time.time())}_{mac.replace(':', '').lower()}"
+    payment_order_id = str(int(time.time() * 1000))
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
         conn.execute(
@@ -271,24 +271,10 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
 
 @app.get("/activate_welcome")
 async def activate_welcome(mac: str, router_id: str = "astana_01"):
-    """Активация 3 минут при первом входе для выбора тарифа"""
+    """Переход на тарифы без активации доступа (Android captive portal)"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         return JSONResponse({"error": "Некорректный MAC"}, status_code=400)
-    
-    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
-    
-    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, 0, 'PAY_WINDOW', ?)",
-            (mac, router_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    
-    # Redirect to tariffs page
+
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
     return RedirectResponse(url=tariff_url, status_code=302)
 
@@ -335,23 +321,37 @@ async def payment_result(request: Request):
             logger.info(f"Payment failed: {params.get('pg_result')}")
             return Response(content="Payment not successful", status_code=400)
 
-        payment_order_id = params.get('pg_order_id', '')
+        payment_order_id = (params.get('pg_order_id') or '').strip()
         mac = params.get('pg_param1')
         router_id = params.get('pg_param2')
         amount = int(float(params.get('pg_amount', 0)))
 
+        if not mac:
+            description = params.get('pg_description', '')
+            mac_match = re.search(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})", description)
+            if mac_match:
+                mac = mac_match.group(1)
+
         if not mac or not router_id:
             conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
             try:
-                row = conn.execute(
-                    "SELECT mac_address, router_id FROM orders WHERE payment_order_id = ? ORDER BY id DESC LIMIT 1",
-                    (payment_order_id,),
-                ).fetchone()
+                row = None
+                if payment_order_id:
+                    row = conn.execute(
+                        "SELECT mac_address, router_id, payment_order_id FROM orders WHERE payment_order_id = ? ORDER BY id DESC LIMIT 1",
+                        (payment_order_id,),
+                    ).fetchone()
+                elif mac:
+                    row = conn.execute(
+                        "SELECT mac_address, router_id, payment_order_id FROM orders WHERE mac_address = ? AND status IN ('PAYMENT_INITIATED', 'PAY_WINDOW') ORDER BY id DESC LIMIT 1",
+                        (mac,),
+                    ).fetchone()
             finally:
                 conn.close()
             if row:
                 mac = mac or row[0]
                 router_id = router_id or row[1]
+                payment_order_id = payment_order_id or (row[2] or '')
 
         router_id = router_id or 'astana_01'
 
@@ -371,10 +371,18 @@ async def payment_result(request: Request):
         # Запись в БД
         conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
         try:
-            updated = conn.execute(
-                "UPDATE orders SET status = 'PAID' WHERE payment_order_id = ?",
-                (payment_order_id,),
-            ).rowcount
+            updated = 0
+            if payment_order_id:
+                updated = conn.execute(
+                    "UPDATE orders SET status = 'PAID', amount = ?, mac_address = ?, router_id = ? WHERE payment_order_id = ?",
+                    (amount, mac, router_id, payment_order_id),
+                ).rowcount
+            elif mac:
+                updated = conn.execute(
+                    "UPDATE orders SET status = 'PAID', amount = ?, router_id = ? WHERE id = (SELECT id FROM orders WHERE mac_address = ? AND status IN ('PAYMENT_INITIATED', 'PAY_WINDOW') ORDER BY id DESC LIMIT 1)",
+                    (amount, router_id, mac),
+                ).rowcount
+
             if not updated:
                 conn.execute(
                     "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id) VALUES (?, ?, 'PAID', ?, ?)",
