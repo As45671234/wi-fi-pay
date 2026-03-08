@@ -198,6 +198,10 @@
             if (response.ok) {
                 successBox.style.display = 'block';
                 btn.innerText = '15 МИНУТ АКТИВИРОВАНО';
+                const closeUrl = data.close_url || 'http://captive.apple.com/hotspot-detect.html';
+                setTimeout(() => {
+                    window.location.href = closeUrl;
+                }, 900);
             } else {
                 alert(data.error || "Ошибка роутера");
                 btn.disabled = false;

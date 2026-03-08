@@ -25,6 +25,7 @@ ROUTERS_CONFIG = {
         "ip": "10.0.0.2",
         "user": "admin",
         "pass": "kaspiwifiadmin2026",
+        "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
     }
 }
 
@@ -104,20 +105,23 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
         user_name = f"T-{mac.replace(':', '')}"
         user_pass = f"p{int(time.time()) % 1000000}"
 
-        for b in binding.get(mac_address=mac):
-            binding.remove(id=b['id'])
-        for a in active.get(mac_address=mac):
-            active.remove(id=a['id'])
-        for u in user_res.get(name=user_name):
-            user_res.remove(id=u['id'])
+        for b in binding.call('print', queries={'mac-address': mac}):
+            binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
+        for a in active.call('print', queries={'mac-address': mac}):
+            active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
+        for u in user_res.call('print', queries={'name': user_name}):
+            user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
 
-        user_res.add(name=user_name, password=user_pass, limit_uptime=f"{minutes}m", comment=f"{mode}_{mac}")
-
-        binding.add(mac_address=mac, type='bypassed', comment=f"{mode}_{mac}")
+        user_res.call('add', arguments={
+            'name': user_name,
+            'password': user_pass,
+            'limit-uptime': f"{minutes}m",
+            'comment': f"{mode}_{mac}",
+        })
 
         host_ip = None
         host_server = None
-        hosts = host_res.get(mac_address=mac)
+        hosts = host_res.call('print', queries={'mac-address': mac})
         if hosts:
             host_ip = hosts[0].get('address')
             host_server = hosts[0].get('server')
@@ -126,18 +130,24 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             login_args = {
                 'user': user_name,
                 'password': user_pass,
-                'mac_address': mac,
+                'mac-address': mac,
                 'ip': host_ip,
             }
             if host_server:
                 login_args['server'] = host_server
             try:
                 active.call('login', arguments=login_args)
-                logger.info(f"✅ Active login выполнен для {mac} ({host_ip})")
+                active_rows = active.call('print', queries={'mac-address': mac})
+                if active_rows:
+                    logger.info(f"✅ Active login выполнен для {mac} ({host_ip})")
+                else:
+                    raise RuntimeError("login command finished but active session not found")
             except Exception as login_error:
-                logger.warning(f"⚠️ Active login не выполнен для {mac}: {login_error}")
+                logger.warning(f"⚠️ Active login не выполнен для {mac}: {login_error}; включаем bypass fallback")
+                binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
         else:
-            logger.warning(f"⚠️ Host для MAC {mac} не найден, оставлен bypass fallback")
+            logger.warning(f"⚠️ Host для MAC {mac} не найден, включаем bypass fallback")
+            binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
 
         now = datetime.now(KZ_TZ)
         expiry = now + timedelta(minutes=minutes)
@@ -145,22 +155,22 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
         mt_time = expiry.strftime("%H:%M:%S")
         task_name = f"del_{mac.replace(':', '')}"
 
-        for t in sched.get(name=task_name):
-            sched.remove(id=t['id'])
+        for t in sched.call('print', queries={'name': task_name}):
+            sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
 
         on_event = (
             f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
             f'/ip hotspot user remove [find name="{user_name}"]; '
             f'/system scheduler remove [find name="{task_name}"];'
         )
-        sched.add(
-            name=task_name,
-            start_date=mt_date,
-            start_time=mt_time,
-            interval="00:00:00",
-            on_event=on_event,
-            comment=f"AUTOCLEAR_{mode}_{mac}",
-        )
+        sched.call('add', arguments={
+            'name': task_name,
+            'start-date': mt_date,
+            'start-time': mt_time,
+            'interval': "00:00:00",
+            'on-event': on_event,
+            'comment': f"AUTOCLEAR_{mode}_{mac}",
+        })
 
         logger.info(f"✅ Статус A H ({mode}) активирован на {minutes} мин для {mac}")
         return True
@@ -199,7 +209,10 @@ async def get_free_trial(mac: str = Form(...), router_id: str = Form(...)):
         )
         conn.commit()
         conn.close()
-        return {"message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь."}
+        return {
+            "message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь.",
+            "close_url": ROUTERS_CONFIG.get(router_id, {}).get("portal_probe_url", "http://captive.apple.com/hotspot-detect.html"),
+        }
     return JSONResponse({"error": "Ошибка роутера"}, status_code=500)
 
 
