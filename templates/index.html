@@ -24,6 +24,7 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
         .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
+        .btn-link { display: block; text-decoration: none; text-align: center; }
         .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
         .trial-success { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
         .trial-success-title { font-weight: 700; margin-bottom: 0.35rem; }
@@ -83,7 +84,7 @@
         </div>
 
         <div id="pay-btn-area">
-            <button class="btn" id="main-pay-btn" onclick="payNow()" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</button>
+            <a class="btn btn-link" id="main-pay-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</a>
             <button class="btn" id="trial-btn" onclick="getTrial()" style="display: none;">ПОЛУЧИТЬ 15 МИНУТ БЕСПЛАТНО</button>
             <div id="trial-success" class="trial-success">
                 <div class="trial-success-title">Доступ открыт на 15 минут</div>
@@ -130,7 +131,7 @@
         element.classList.add('active');
         
         const btnArea = document.getElementById('pay-btn-area');
-        const payBtn = document.getElementById('main-pay-btn');
+        const payLink = document.getElementById('main-pay-link');
         const trialBtn = document.getElementById('trial-btn');
         const trialSuccess = document.getElementById('trial-success');
         btnArea.style.display = 'block';
@@ -138,11 +139,12 @@
 
         if (amount === 0) {
             trialBtn.style.display = 'block';
-            payBtn.style.display = 'none';
+            payLink.style.display = 'none';
         } else {
             trialBtn.style.display = 'none';
-            payBtn.style.display = 'block';
-            payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
+            payLink.style.display = 'block';
+            payLink.textContent = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
+            payLink.href = `/start_payment?amount=${encodeURIComponent(amount)}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
         }
     }
 
@@ -154,29 +156,6 @@
         } finally {
             clearTimeout(timer);
         }
-    }
-
-    async function payNow() {
-        const btn = document.getElementById('main-pay-btn');
-        const originalText = btn.innerText;
-        btn.disabled = true;
-        btn.innerText = "ПОДГОТОВКА (3 МИН)...";
-
-        const redirectUrl = `/start_payment?amount=${encodeURIComponent(selectedAmt)}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
-
-        const paymentLink = document.createElement('a');
-        paymentLink.href = redirectUrl;
-        paymentLink.target = '_blank';
-        paymentLink.rel = 'noopener noreferrer';
-        paymentLink.style.display = 'none';
-        document.body.appendChild(paymentLink);
-        paymentLink.click();
-        paymentLink.remove();
-
-        setTimeout(() => {
-            btn.disabled = false;
-            btn.innerText = originalText;
-        }, 1200);
     }
 
     async function getTrial() {
@@ -207,14 +186,6 @@
     }
 
     window.onpageshow = function(event) {
-        const payBtn = document.getElementById('main-pay-btn');
-        if (payBtn) {
-            payBtn.disabled = false;
-            payBtn.innerText = selectedAmt > 0
-                ? `ОПЛАТИТЬ ${selectedAmt} ₸ И ПОЛУЧИТЬ ДОСТУП`
-                : "ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП";
-        }
-
         const trialBtn = document.getElementById('trial-btn');
         if (trialBtn) {
             trialBtn.disabled = false;
