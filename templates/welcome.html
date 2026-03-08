@@ -67,7 +67,7 @@
         
         <button class="btn-start" id="start-btn" onclick="activateAndContinue()">
             ПОЛУЧИТЬ 3 МИНУТЫ И НАЧАТЬ
-            <div class="btn-bonus">🎁 Бесплатный доступ для выбора тарифа</div>
+            <div class="btn-bonus">Бесплатный доступ для выбора тарифа</div>
         </button>
         
         <div class="mac-id">ID: {{ mac }}</div>
@@ -99,12 +99,12 @@
                 const data = await response.json();
                 alert(data.error || 'Ошибка активации');
                 btn.disabled = false;
-                btn.innerHTML = 'ПОЛУЧИТЬ 3 МИНУТЫ И НАЧАТЬ<div class="btn-bonus">🎁 Бесплатный доступ для выбора тарифа</div>';
+                btn.innerHTML = 'ПОЛУЧИТЬ 3 МИНУТЫ И НАЧАТЬ<div class="btn-bonus">Бесплатный доступ для выбора тарифа</div>';
             }
         } catch (e) {
             alert('Ошибка соединения. Попробуйте еще раз.');
             btn.disabled = false;
-            btn.innerHTML = 'ПОЛУЧИТЬ 3 МИНУТЫ И НАЧАТЬ<div class="btn-bonus">🎁 Бесплатный доступ для выбора тарифа</div>';
+            btn.innerHTML = 'ПОЛУЧИТЬ 3 МИНУТЫ И НАЧАТЬ<div class="btn-bonus">Бесплатный доступ для выбора тарифа</div>';
         }
     }
     </script>
