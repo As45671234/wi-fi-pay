@@ -28,6 +28,7 @@
         .trial-success { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
         .trial-success-title { font-weight: 700; margin-bottom: 0.35rem; }
         .trial-success-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
+        .exit-hint { margin-top: 0.85rem; font-size: 0.82rem; color: #64748b; text-align: center; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
         
@@ -90,6 +91,8 @@
                 <div class="trial-success-text">Нажмите «Готово» вверху справа. Если кнопки нет — нажмите «Закрыть окно» ниже.</div>
                 <button class="btn" type="button" onclick="closeCaptivePortal()">ЗАКРЫТЬ ОКНО</button>
             </div>
+            <button class="btn" id="exit-captive-btn" type="button" onclick="closeCaptivePortal()" style="display: none; margin-top: 0.8rem; background-color: #475569; box-shadow: none;">ВЫЙТИ ИЗ ОКНА АВТОРИЗАЦИИ</button>
+            <div id="exit-hint" class="exit-hint" style="display: none;">Если вы на iPhone: после нажатия используйте кнопку «Готово» или синюю галочку сверху.</div>
         </div>
         
         <div class="mac-id">ID: {{ mac }}</div>
@@ -138,10 +141,14 @@
         if (amount === 0) {
             trialBtn.style.display = 'block';
             payBtn.style.display = 'none';
+            document.getElementById('exit-captive-btn').style.display = 'block';
+            document.getElementById('exit-hint').style.display = 'block';
         } else {
             trialBtn.style.display = 'none';
             payBtn.style.display = 'block';
             payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
+            document.getElementById('exit-captive-btn').style.display = 'block';
+            document.getElementById('exit-hint').style.display = 'block';
         }
     }
 
@@ -170,7 +177,10 @@
             const response = await fetchWithTimeout('/get_pay_link', { method: 'POST', body: fd }, 9000);
             const data = await response.json();
             if (response.ok && data.url) {
-                window.location.href = data.url;
+                const opened = window.open(data.url, '_blank');
+                if (!opened) {
+                    window.location.href = data.url;
+                }
             } else {
                 throw new Error('no url');
             }
@@ -214,7 +224,11 @@
 
     function closeCaptivePortal() {
         try {
-            window.location.href = 'http://captive.apple.com/hotspot-detect.html';
+            const probeUrl = 'http://captive.apple.com/hotspot-detect.html';
+            const opened = window.open(probeUrl, '_blank');
+            if (!opened) {
+                window.location.href = probeUrl;
+            }
             setTimeout(() => {
                 window.close();
             }, 300);
@@ -235,6 +249,16 @@
         const trialBtn = document.getElementById('trial-btn');
         if (trialBtn) {
             trialBtn.disabled = false;
+        }
+
+        const exitBtn = document.getElementById('exit-captive-btn');
+        if (exitBtn && selectedAmt >= 0) {
+            exitBtn.style.display = 'block';
+        }
+
+        const exitHint = document.getElementById('exit-hint');
+        if (exitHint && selectedAmt >= 0) {
+            exitHint.style.display = 'block';
         }
     };
     
