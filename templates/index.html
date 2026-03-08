@@ -163,7 +163,20 @@
         btn.innerText = "ПОДГОТОВКА (3 МИН)...";
 
         const redirectUrl = `/start_payment?amount=${encodeURIComponent(selectedAmt)}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
-        window.location.href = redirectUrl;
+
+        const paymentLink = document.createElement('a');
+        paymentLink.href = redirectUrl;
+        paymentLink.target = '_blank';
+        paymentLink.rel = 'noopener noreferrer';
+        paymentLink.style.display = 'none';
+        document.body.appendChild(paymentLink);
+        paymentLink.click();
+        paymentLink.remove();
+
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }, 1200);
     }
 
     async function getTrial() {
