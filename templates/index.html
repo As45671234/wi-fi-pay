@@ -148,9 +148,15 @@
         btn.disabled = true;
         btn.innerText = "ПОДГОТОВКА (3 МИН)...";
 
-        // Redirect to /start_payment which activates 3min access and redirects to FreedomPay
+        // iOS captive portal requires target="_blank" to open Safari
         const payUrl = `/start_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
-        window.location.href = payUrl;
+        const link = document.createElement('a');
+        link.href = payUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     async function getTrial() {
