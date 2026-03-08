@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Local runtime database
+gateway.db
