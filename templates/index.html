@@ -167,7 +167,7 @@
 
                 if (data.url) {
                     const trialLogin = "T-" + macAddress.replace(/:/g, "");
-                    window.location.href = `http://192.168.88.1/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
+                    window.location.href = `http://192.168.99.1/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
                 } else {
                     alert("Ошибка получения ссылки");
                     btn.disabled = false;
