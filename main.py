@@ -15,7 +15,10 @@ from fastapi.staticfiles import StaticFiles
 import routeros_api
 
 # --- НАСТРОЙКИ ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.WARNING,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("WiFiGateway")
 
 app = FastAPI(title="Wi-Fi Gateway Final")
@@ -56,17 +59,28 @@ def init_db():
     conn.close()
 
 
-def check_trial_used_today(mac: str):
+def get_db_connection():
+    """Context manager для безопасной работы с БД"""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
-    cursor = conn.cursor()
-    today_start = datetime.now(KZ_TZ).strftime("%Y-%m-%d 00:00:00")
-    cursor.execute(
-        "SELECT id FROM orders WHERE mac_address = ? AND status = 'TRIAL' AND created_at >= ?",
-        (mac, today_start),
-    )
-    res = cursor.fetchone()
-    conn.close()
-    return res is not None
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def check_trial_used_today(mac: str) -> bool:
+    """Проверяет, использовал ли MAC пробный период сегодня"""
+    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+    try:
+        cursor = conn.cursor()
+        today_start = datetime.now(KZ_TZ).strftime("%Y-%m-%d 00:00:00")
+        cursor.execute(
+            "SELECT id FROM orders WHERE mac_address = ? AND status = 'TRIAL' AND created_at >= ?",
+            (mac, today_start),
+        )
+        return cursor.fetchone() is not None
+    finally:
+        conn.close()
 
 
 init_db()
@@ -163,10 +177,11 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             'comment': f"AUTOCLEAR_{mode}_{mac}",
         })
 
-        logger.info(f"✅ Доступ ({mode}) активирован на {minutes} мин для {mac}; mode={access_mode}")
+        if mode in ['PAID', 'PAY_WINDOW']:
+            logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
         return True
     except Exception as e:
-        logger.exception(f"❌ Ошибка API MikroTik ({router_id}/{config.get('ip')}): {e}")
+        logger.error(f"MikroTik API error for {router_id}: {str(e)[:100]}")
         return False
     finally:
         if connection:
@@ -217,72 +232,97 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 
 @app.get("/start_payment")
 async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
+    """Активирует окно оплаты и редиректит на FreedomPay"""
+    # Валидация
+    if amount not in [490, 990, 2490]:
+        return JSONResponse({"error": "Некорректная сумма"}, status_code=400)
+    
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
+    
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        return JSONResponse({"error": "Роутер недоступен или MAC некорректен"}, status_code=500)
+        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
 
     payment_url = build_payment_url(amount, mac, router_id)
-    logger.info(f"Redirect payment URL for {mac}: {payment_url}")
     return RedirectResponse(url=payment_url, status_code=302)
 
 
 @app.post("/get_free_trial")
 async def get_free_trial(mac: str = Form(...), router_id: str = Form(...)):
-    """Выдача 15 минут один раз в сутки"""
+    """Выдача 15 минут бесплатного доступа (1 раз в сутки)"""
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
+    
     if check_trial_used_today(mac):
         return JSONResponse({"error": "Бесплатный доступ уже использован сегодня. Ждем вас завтра!"}, status_code=403)
 
-    if set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
-        conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+    if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
+        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
+    
+    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+    try:
         conn.execute(
             "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, 0, 'TRIAL', ?)",
             (mac, router_id),
         )
         conn.commit()
+    finally:
         conn.close()
-        return {
-            "message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь.",
-            "close_url": ROUTERS_CONFIG.get(router_id, {}).get("portal_probe_url", "http://captive.apple.com/hotspot-detect.html"),
-        }
-    return JSONResponse({"error": "Ошибка роутера"}, status_code=500)
-
-
-@app.post("/get_pay_link")
-async def get_pay_link(amount: int = Form(...), mac: str = Form(...), router_id: str = Form(...)):
-    # ШАГ 1: Окно для оплаты - строго 3 минуты (Статус A H)
-    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        logger.error(f"Failed to set MikroTik access for {mac}")
-        return JSONResponse({"error": "Роутер недоступен или MAC некорректен"}, status_code=500)
-
-    # ШАГ 2: Ссылка в банк
-    payment_url = build_payment_url(amount, mac, router_id)
-    logger.info(f"Payment URL for {mac}: {payment_url}")
-    response_data = {"url": payment_url, "status": "ok"}
-    logger.info(f"Returning response: {response_data}")
-    return JSONResponse(response_data)
+    
+    return {"message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь."}
 
 
 @app.post("/payment_result")
 async def payment_result(request: Request):
-    form_data = await request.form()
-    params = dict(form_data)
+    """Принимает callback от FreedomPay и активирует оплаченный доступ"""
+    try:
+        form_data = await request.form()
+        params = dict(form_data)
 
-    if params.get('pg_sig') == get_signature("payment_result", params, SECRET_KEY) and params.get('pg_result') == '1':
-        mac, router_id = params.get('pg_param1'), params.get('pg_param2', 'astana_01')
+        # Проверка подписи
+        if params.get('pg_sig') != get_signature("payment_result", params, SECRET_KEY):
+            logger.warning("Invalid signature in payment callback")
+            return Response(content="Invalid signature", status_code=400)
+        
+        # Проверка успешной оплаты
+        if params.get('pg_result') != '1':
+            logger.info(f"Payment failed: {params.get('pg_result')}")
+            return Response(content="Payment not successful", status_code=400)
+
+        mac = params.get('pg_param1')
+        router_id = params.get('pg_param2', 'astana_01')
         amount = int(float(params.get('pg_amount', 0)))
 
-        minutes = 60 if amount < 900 else 180 if amount < 2000 else 1440
+        # Определение времени доступа
+        if amount >= 2000:
+            minutes = 1440  # 24 часа
+        elif amount >= 900:
+            minutes = 180   # 3 часа
+        else:
+            minutes = 60    # 1 час
 
-        if mac and set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID"):
-            conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+        # Активация доступа
+        if not mac or not set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID"):
+            logger.error(f"Failed to activate paid access for {mac}")
+            return Response(content="Activation failed", status_code=500)
+
+        # Запись в БД
+        conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+        try:
             conn.execute(
                 "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, ?, 'PAID', ?)",
                 (mac, amount, router_id),
             )
             conn.commit()
+            logger.info(f"Payment processed: {amount}₸ for {mac[:8]}*** ({minutes}min)")
+        finally:
             conn.close()
-            return Response(content="Accepted", status_code=200)
 
-    return Response(content="Error", status_code=400)
+        return Response(content="OK", status_code=200)
+    
+    except Exception as e:
+        logger.error(f"Payment processing error: {str(e)[:200]}")
+        return Response(content="Internal error", status_code=500)
 
 @app.get("/success", response_class=HTMLResponse)
 async def success():

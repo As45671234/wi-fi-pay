@@ -3,5 +3,19 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Environment variables
+.env
+
 # Local runtime database
 gateway.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
