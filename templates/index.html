@@ -107,93 +107,84 @@
     </div>
 
     <script>
-        let selectedAmt = -1;
+    let selectedAmt = -1;
 
-        // Функция выбора тарифа
-        function selectT(amount, element) {
-            selectedAmt = amount;
-            
-            // Убираем активный класс у всех карточек
-            const cards = document.querySelectorAll('.tariff-card');
-            cards.forEach(card => card.classList.remove('active'));
-            
-            // Добавляем активный класс текущей
-            element.classList.add('active');
-            
-            // Показываем кнопку
-            const btnArea = document.getElementById('pay-btn-area');
-            const amtLabel = document.getElementById('amt-display');
-            btnArea.style.display = 'block';
-            
-            if (amount === 0) {
-                amtLabel.innerText = "БЕСПЛАТНО";
-            } else {
-                amtLabel.innerText = amount;
-            }
+    // 1. Получаем данные из URL (которые прислал MikroTik)
+    const urlParams = new URLSearchParams(window.location.search);
+    const macAddress = urlParams.get('mac') || "{{ mac }}";
+    const routerId = urlParams.get('router_id') || "{{ router_id }}"; // Добавляем router_id
+
+    function selectT(amount, element) {
+        selectedAmt = amount;
+        const cards = document.querySelectorAll('.tariff-card');
+        cards.forEach(card => card.classList.remove('active'));
+        element.classList.add('active');
+        
+        const btnArea = document.getElementById('pay-btn-area');
+        const amtLabel = document.getElementById('amt-display');
+        btnArea.style.display = 'block';
+        
+        if (amount === 0) {
+            amtLabel.innerText = "БЕСПЛАТНО";
+        } else {
+            amtLabel.innerText = amount;
         }
+    }
 
-        // Функция оплаты / активации
-        async function payNow() {
-            if (selectedAmt < 0) return;
+    async function payNow() {
+        if (selectedAmt < 0) return;
 
-            const btn = document.getElementById('main-pay-btn');
-            btn.disabled = true;
-            btn.innerText = "ПОДОЖДИТЕ...";
+        const btn = document.getElementById('main-pay-btn');
+        btn.disabled = true;
+        btn.innerText = "ПОДОЖДИТЕ...";
 
-            const macAddress = "{{ mac }}";
+        if (selectedAmt === 0) {
+            try {
+                const fd = new FormData();
+                fd.append('mac', macAddress);
+                const response = await fetch('/get_free_access', { method: 'POST', body: fd });
+                const data = await response.json();
+                if (response.ok) {
+                    window.location.href = "/success";
+                } else {
+                    alert(data.error || "Ошибка активации");
+                    btn.disabled = false;
+                    btn.innerText = "ОПЛАТИТЬ 0 ₸";
+                }
+            } catch (e) {
+                alert("Ошибка связи с сервером");
+                btn.disabled = false;
+            }
+        } else {
+            try {
+                const fd = new FormData();
+                fd.append('amount', selectedAmt);
+                fd.append('mac', macAddress);
+                fd.append('router_id', routerId); // ТЕПЕРЬ МЫ ОТПРАВЛЯЕМ ID РОУТЕРА
 
-            if (selectedAmt === 0) {
-                // БЕСПЛАТНЫЙ ТАРИФ
-                try {
-                    const fd = new FormData();
-                    fd.append('mac', macAddress);
-                    const response = await fetch('/get_free_access', { method: 'POST', body: fd });
-                    const data = await response.json();
+                const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
+                const data = await response.json();
 
-                    if (response.ok) {
-                        window.location.href = "/success";
-                    } else {
-                        alert(data.error || "Ошибка активации");
-                        btn.disabled = false;
-                        btn.innerText = "ОПЛАТИТЬ 0 ₸";
-                    }
-                } catch (e) {
-                    alert("Ошибка связи с сервером");
+                if (data.url) {
+                    const trialLogin = "T-" + macAddress.replace(/:/g, "");
+                    window.location.href = `http://192.168.88.1/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
+                } else {
+                    alert("Ошибка получения ссылки");
                     btn.disabled = false;
                 }
-            } else {
-                // ПЛАТНЫЙ ТАРИФ
-                try {
-                    const fd = new FormData();
-                    fd.append('amount', selectedAmt);
-                    fd.append('mac', macAddress);
-
-                    const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
-                    const data = await response.json();
-
-                    if (data.url) {
-                        // ИСПРАВЛЕНИЕ: Сначала даем 3 минуты интернета через MikroTik,
-                        // а MikroTik уже сам моментально перекинет на Freedom Pay
-                        const trialLogin = "T-" + macAddress;
-                        window.location.href = `http://192.168.88.1/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
-                    } else {
-                        alert("Ошибка получения ссылки");
-                    }
-                } catch (e) {
-                    alert("Ошибка сети");
-                } finally {
-                    btn.disabled = false;
-                    btn.innerTex
-                    t = "ОПЛАТИТЬ " + selectedAmt + " ₸";
-                }
+            } catch (e) {
+                alert("Ошибка сети");
+                btn.disabled = false;
+            } finally {
+                btn.innerText = "ОПЛАТИТЬ " + selectedAmt + " ₸";
             }
         }
+    }
 
-        // Закрытие фрейма
-        function closeP() {
-            document.getElementById('overlay').style.display = 'none';
-            document.getElementById('pay-iframe').src = "";
-        }
-    </script>
+    function closeP() {
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('pay-iframe').src = "";
+    }
+</script>
 </body>
 </html>
