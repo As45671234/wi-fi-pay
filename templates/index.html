@@ -137,6 +137,16 @@
         }
     }
 
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     async function payNow() {
         const btn = document.getElementById('main-pay-btn');
         const originalText = btn.innerText;
@@ -149,9 +159,9 @@
         fd.append('router_id', routerId);
 
         try {
-            const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
+            const response = await fetchWithTimeout('/get_pay_link', { method: 'POST', body: fd }, 9000);
             const data = await response.json();
-            if (data.url) {
+            if (response.ok && data.url) {
                 window.location.href = data.url;
             } else {
                 throw new Error('no url');
@@ -171,13 +181,18 @@
         fd.append('mac', macAddress);
         fd.append('router_id', routerId);
 
-        const response = await fetch('/get_free_trial', { method: 'POST', body: fd });
-        const data = await response.json();
+        try {
+            const response = await fetchWithTimeout('/get_free_trial', { method: 'POST', body: fd }, 9000);
+            const data = await response.json();
 
-        if (response.ok) {
-            alert(data.message);
-        } else {
-            alert(data.error);
+            if (response.ok) {
+                alert(data.message);
+            } else {
+                alert(data.error || "Ошибка роутера");
+                btn.disabled = false;
+            }
+        } catch (e) {
+            alert("Роутер не ответил. Попробуйте еще раз.");
             btn.disabled = false;
         }
     }

@@ -3,7 +3,8 @@ import hashlib
 import time
 import logging
 import sqlite3
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode
 
@@ -76,6 +77,11 @@ init_db()
 def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
     config = ROUTERS_CONFIG.get(router_id)
     if not config:
+        logger.error(f"❌ Неизвестный router_id: {router_id}")
+        return False
+
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        logger.error(f"❌ Некорректный MAC: {mac}")
         return False
 
     connection = None
@@ -84,30 +90,48 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             config['ip'],
             username=config['user'],
             password=config['pass'],
+            port=config.get('port', 8728),
             plaintext_login=True,
         )
         api = connection.get_api()
 
-        active = api.get_resource('/ip/hotspot/active')
-        user_res = api.get_resource('/ip/hotspot/user')
         binding = api.get_resource('/ip/hotspot/ip-binding')
-
-        user_name = f"T-{mac.replace(':', '')}"
+        active = api.get_resource('/ip/hotspot/active')
+        sched = api.get_resource('/system/scheduler')
 
         for b in binding.get(mac_address=mac):
             binding.remove(id=b['id'])
         for a in active.get(mac_address=mac):
             active.remove(id=a['id'])
-        for u in user_res.get(name=user_name):
-            user_res.remove(id=u['id'])
 
-        user_res.add(name=user_name, limit_uptime=f"{minutes}m", comment=f"{mode}_{mac}")
-        active.add(user=user_name, mac_address=mac)
+        binding.add(mac_address=mac, type='bypassed', comment=f"{mode}_{mac}")
+
+        now = datetime.now(KZ_TZ)
+        expiry = now + timedelta(minutes=minutes)
+        mt_date = expiry.strftime("%b/%d/%Y").lower()
+        mt_time = expiry.strftime("%H:%M:%S")
+        task_name = f"del_{mac.replace(':', '')}"
+
+        for t in sched.get(name=task_name):
+            sched.remove(id=t['id'])
+
+        on_event = (
+            f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
+            f'/system scheduler remove [find name="{task_name}"];'
+        )
+        sched.add(
+            name=task_name,
+            start_date=mt_date,
+            start_time=mt_time,
+            interval="00:00:00",
+            on_event=on_event,
+            comment=f"AUTOCLEAR_{mode}_{mac}",
+        )
 
         logger.info(f"✅ Статус A H ({mode}) активирован на {minutes} мин для {mac}")
         return True
     except Exception as e:
-        logger.error(f"❌ Ошибка API: {e}")
+        logger.exception(f"❌ Ошибка API MikroTik ({router_id}/{config.get('ip')}): {e}")
         return False
     finally:
         if connection:
@@ -148,7 +172,8 @@ async def get_free_trial(mac: str = Form(...), router_id: str = Form(...)):
 @app.post("/get_pay_link")
 async def get_pay_link(amount: int = Form(...), mac: str = Form(...), router_id: str = Form(...)):
     # ШАГ 1: Окно для оплаты - строго 3 минуты (Статус A H)
-    set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW")
+    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
+        return JSONResponse({"error": "Роутер недоступен или MAC некорректен"}, status_code=500)
 
     # ШАГ 2: Ссылка в банк
     params = {
