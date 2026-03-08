@@ -1,0 +1,18 @@
+<html>
+<head>
+    <title>Hotspot Login</title>
+    <meta charset="utf-8">
+</head>
+<body>
+    $(if error)
+        <div style="color:red; text-align:center; padding:20px;">
+            <b>Ошибка доступа: $(error)</b><br><br>
+            <a href="https://wifi-pay.kz/?mac=$(mac)&router_id=astana_01">Вернуться на сайт оплаты</a>
+        </div>
+    $(else)
+        <script>
+            window.location.href = "https://wifi-pay.kz/?mac=$(mac)&router_id=astana_01";
+        </script>
+    $(endif)
+</body>
+</html>

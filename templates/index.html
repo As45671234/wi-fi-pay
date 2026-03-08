@@ -143,11 +143,9 @@
         const data = await response.json();
 
         if (data.url) {
-            const routerIp = "192.168.99.1";
-            // Роутер дает пробный доступ и сразу перенаправляет на оплату (dst)
-            window.location.href = `http://${routerIp}/trial?dst=${encodeURIComponent(data.url)}`;
+            window.location.href = data.url;
         } else {
-            alert("Ошибка сервера");
+            alert("Ошибка получения ссылки");
             btn.disabled = false;
         }
     } catch (e) {
