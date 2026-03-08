@@ -214,11 +214,6 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
 
 @app.get("/tariffs", response_class=HTMLResponse)
 async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
-    return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id})
-
-
-@app.get("/tariffs", response_class=HTMLResponse)
-async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("index.html", {"request": request, "mac": mac, "router_id": router_id})
 
 
