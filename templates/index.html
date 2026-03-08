@@ -109,10 +109,11 @@
     <script>
     let selectedAmt = -1;
 
-    // 1. Получаем данные из URL (которые прислал MikroTik)
+    // 1. Получаем данные из URL (которые прислал MikroTik) или из шаблона
     const urlParams = new URLSearchParams(window.location.search);
     const macAddress = urlParams.get('mac') || "{{ mac }}";
-    const routerId = urlParams.get('router_id') || "{{ router_id }}"; // Добавляем router_id
+    const routerId = urlParams.get('router_id') || "{{ router_id }}";
+    const routerIp = "192.168.99.1"; // Убедись, что этот IP верный!
 
     function selectT(amount, element) {
         selectedAmt = amount;
@@ -124,44 +125,63 @@
         const amtLabel = document.getElementById('amt-display');
         btnArea.style.display = 'block';
         
-        if (amount === 0) {
-            amtLabel.innerText = "БЕСПЛАТНО";
-        } else {
-            amtLabel.innerText = amount;
-        }
+        amtLabel.innerText = (amount === 0) ? "БЕСПЛАТНО" : amount;
     }
 
     async function payNow() {
         if (selectedAmt < 0) return;
         const btn = document.getElementById('main-pay-btn');
+        const originalText = btn.innerText;
+        
         btn.disabled = true;
-        btn.innerText = "ПОЛУЧЕНИЕ ДОСТУПА...";
+        btn.innerText = "ПОДОЖДИТЕ...";
 
+        // Формируем данные для отправки
         const fd = new FormData();
-        fd.append('amount', selectedAmt);
         fd.append('mac', macAddress);
         fd.append('router_id', routerId);
 
-        try {
-            const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
-            const data = await response.json();
-
-            if (data.url) {
-                // 1. Убираем двоеточия из MAC (MikroTik требует чистый логин)
-                const cleanMac = macAddress.replace(/:/g, "");
-                const trialLogin = "T-" + cleanMac;
-                
-                // 2. Используем твой реальный IP роутера 192.168.99.1
-                // Эта команда дает 3 минуты интернета и СРАЗУ перекидывает по ссылке банка (data.url)
-                const routerIp = "192.168.99.1";
-                window.location.href = `http://${routerIp}/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
-            } else {
-                alert("Ошибка: Сервер не выдал ссылку");
+        if (selectedAmt === 0) {
+            // --- ЛОГИКА БЕСПЛАТНОГО ДОСТУПА ---
+            try {
+                const response = await fetch('/get_free_access', { method: 'POST', body: fd });
+                if (response.ok) {
+                    // Активируем Trial на роутере и переходим на страницу успеха
+                    const cleanMac = macAddress.replace(/:/g, "");
+                    window.location.href = `http://${routerIp}/login?username=T-${cleanMac}&dst=${encodeURIComponent('/success')}`;
+                } else {
+                    const data = await response.json();
+                    alert(data.error || "Ошибка получения бесплатного доступа");
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                }
+            } catch (e) {
+                alert("Ошибка сети при запросе бесплатного доступа");
                 btn.disabled = false;
+                btn.innerText = originalText;
             }
-        } catch (e) {
-            alert("Ошибка сети");
-            btn.disabled = false;
+        } else {
+            // --- ЛОГИКА ОПЛАТЫ ---
+            fd.append('amount', selectedAmt);
+            try {
+                const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
+                const data = await response.json();
+
+                if (data.url) {
+                    const cleanMac = macAddress.replace(/:/g, "");
+                    const trialLogin = "T-" + cleanMac;
+                    // Редирект на роутер для активации 3 минут и перехода в банк
+                    window.location.href = `http://${routerIp}/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
+                } else {
+                    alert("Ошибка: Сервер не выдал ссылку на оплату");
+                    btn.disabled = false;
+                    btn.innerText = originalText;
+                }
+            } catch (e) {
+                alert("Ошибка сети. Проверьте соединение.");
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
         }
     }
 
