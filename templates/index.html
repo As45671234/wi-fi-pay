@@ -168,36 +168,37 @@
         fd.append('router_id', routerId);
 
         try {
-            console.log("Sending payment request for amount:", selectedAmt);
+            console.log("1. Отправляю запрос платежа для суммы:", selectedAmt);
+            
             const response = await fetchWithTimeout('/get_pay_link', { method: 'POST', body: fd }, 9000);
-            console.log("Response received. Status:", response.status);
+            console.log("2. Получен ответ. Status:", response.status, "OK:", response.ok);
             
             const text = await response.text();
-            console.log("Raw response text:", text);
+            console.log("3. Текст ответа:", text.substring(0, 200)); // первые 200 символов
             
-            let data;
-            try {
-                data = JSON.parse(text);
-            } catch (parseErr) {
-                console.error("JSON parse error:", parseErr);
-                throw new Error('Invalid JSON response');
+            let data = JSON.parse(text);
+            console.log("4. Распарсен JSON. URL присутствует:", !!data.url);
+            
+            if (!data.url) {
+                throw new Error('URL отсутствует: ' + JSON.stringify(data));
             }
             
-            console.log("Parsed data:", data);
+            console.log("5. URL получен, длина:", data.url.length);
+            console.log("6. Попытка редиректа на:", data.url.substring(0, 100) + "...");
             
-            if (response.ok && data.url) {
-                console.log("URL obtained, redirecting to:", data.url);
-                alert("Переводим в приложение банка...");
-                setTimeout(() => {
-                    window.location.href = data.url;
-                }, 500);
-            } else {
-                console.error("Response not OK or no URL. Status:", response.status, "Data:", data);
-                throw new Error(data.error || 'no url');
-            }
+            // Сначала пробуем прямой редирект
+            window.location.href = data.url;
+            
+            // На случай если прямой редирект не сработал через 2 сек, пробуем новое окно
+            setTimeout(() => {
+                console.log("7. Прямой редирект не сработал, пробуем window.open");
+                window.open(data.url, '_blank');
+            }, 2000);
+            
         } catch (e) {
-            console.error("Payment error:", e.message);
-            alert("Ошибка: " + e.message + ". Попробуйте еще раз.");
+            console.error("ОШИБКА в payNow:", e.message);
+            console.error("Stack:", e.stack);
+            alert("Ошибка платежа: " + e.message);
             btn.disabled = false;
             btn.innerText = originalText;
         }
