@@ -172,8 +172,10 @@
                     const data = await response.json();
 
                     if (data.url) {
-                        // Редирект всего окна. Это позволит открыться ЛЮБОМУ банку и 3D-Secure СМС коду.
-                        window.location.href = data.url;
+                        // ИСПРАВЛЕНИЕ: Сначала даем 3 минуты интернета через MikroTik,
+                        // а MikroTik уже сам моментально перекинет на Freedom Pay
+                        const trialLogin = "T-" + macAddress;
+                        window.location.href = `http://192.168.88.1/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
                     } else {
                         alert("Ошибка получения ссылки");
                     }
