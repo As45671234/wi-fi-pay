@@ -168,18 +168,36 @@
         fd.append('router_id', routerId);
 
         try {
+            console.log("Sending payment request for amount:", selectedAmt);
             const response = await fetchWithTimeout('/get_pay_link', { method: 'POST', body: fd }, 9000);
-            const data = await response.json();
-            console.log("Response status:", response.status, "Data:", data);
+            console.log("Response received. Status:", response.status);
+            
+            const text = await response.text();
+            console.log("Raw response text:", text);
+            
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseErr) {
+                console.error("JSON parse error:", parseErr);
+                throw new Error('Invalid JSON response');
+            }
+            
+            console.log("Parsed data:", data);
+            
             if (response.ok && data.url) {
-                console.log("Redirecting to:", data.url);
-                window.location.href = data.url;
+                console.log("URL obtained, redirecting to:", data.url);
+                alert("Переводим в приложение банка...");
+                setTimeout(() => {
+                    window.location.href = data.url;
+                }, 500);
             } else {
-                throw new Error('no url');
+                console.error("Response not OK or no URL. Status:", response.status, "Data:", data);
+                throw new Error(data.error || 'no url');
             }
         } catch (e) {
-            console.error("Payment error:", e);
-            alert("Ошибка. Попробуйте еще раз.");
+            console.error("Payment error:", e.message);
+            alert("Ошибка: " + e.message + ". Попробуйте еще раз.");
             btn.disabled = false;
             btn.innerText = originalText;
         }

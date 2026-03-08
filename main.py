@@ -211,6 +211,7 @@ async def get_free_trial(mac: str = Form(...), router_id: str = Form(...)):
 async def get_pay_link(amount: int = Form(...), mac: str = Form(...), router_id: str = Form(...)):
     # ШАГ 1: Окно для оплаты - строго 3 минуты (Статус A H)
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
+        logger.error(f"Failed to set MikroTik access for {mac}")
         return JSONResponse({"error": "Роутер недоступен или MAC некорректен"}, status_code=500)
 
     # ШАГ 2: Ссылка в банк
@@ -223,7 +224,9 @@ async def get_pay_link(amount: int = Form(...), mac: str = Form(...), router_id:
     params['pg_sig'] = get_signature("payment.php", params, SECRET_KEY)
     payment_url = f"{PAY_URL}?{urlencode(params)}"
     logger.info(f"Payment URL for {mac}: {payment_url}")
-    return {"url": payment_url}
+    response_data = {"url": payment_url, "status": "ok"}
+    logger.info(f"Returning response: {response_data}")
+    return JSONResponse(response_data)
 
 
 @app.post("/payment_result")
