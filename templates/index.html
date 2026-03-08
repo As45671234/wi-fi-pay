@@ -24,11 +24,14 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
         .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
+        a.btn { display: block; text-decoration: none; text-align: center; }
         .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
         .trial-success { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
         .trial-success-title { font-weight: 700; margin-bottom: 0.35rem; }
         .trial-success-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
-        .exit-hint { margin-top: 0.85rem; font-size: 0.82rem; color: #64748b; text-align: center; }
+        .pay-ready { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
+        .pay-ready-title { font-weight: 700; margin-bottom: 0.35rem; }
+        .pay-ready-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
         
@@ -88,11 +91,13 @@
             <button class="btn" id="trial-btn" onclick="getTrial()" style="display: none;">ПОЛУЧИТЬ 15 МИНУТ БЕСПЛАТНО</button>
             <div id="trial-success" class="trial-success">
                 <div class="trial-success-title">Доступ открыт на 15 минут</div>
-                <div class="trial-success-text">Нажмите «Готово» вверху справа. Если кнопки нет — нажмите «Закрыть окно» ниже.</div>
-                <button class="btn" type="button" onclick="closeCaptivePortal()">ЗАКРЫТЬ ОКНО</button>
+                <div class="trial-success-text">Нажмите «Готово» вверху справа и продолжайте пользоваться интернетом.</div>
             </div>
-            <button class="btn" id="exit-captive-btn" type="button" onclick="closeCaptivePortal()" style="display: none; margin-top: 0.8rem; background-color: #475569; box-shadow: none;">ВЫЙТИ ИЗ ОКНА АВТОРИЗАЦИИ</button>
-            <div id="exit-hint" class="exit-hint" style="display: none;">Если вы на iPhone: после нажатия используйте кнопку «Готово» или синюю галочку сверху.</div>
+            <div id="pay-ready" class="pay-ready">
+                <div class="pay-ready-title">Окно оплаты открыто на 3 минуты</div>
+                <div class="pay-ready-text">Нажмите кнопку ниже — банк откроется в браузере.</div>
+                <a id="bank-link-btn" class="btn" href="#" target="_blank" rel="noopener noreferrer">ОТКРЫТЬ БАНК В БРАУЗЕРЕ</a>
+            </div>
         </div>
         
         <div class="mac-id">ID: {{ mac }}</div>
@@ -136,19 +141,19 @@
         const btnArea = document.getElementById('pay-btn-area');
         const payBtn = document.getElementById('main-pay-btn');
         const trialBtn = document.getElementById('trial-btn');
+        const payReady = document.getElementById('pay-ready');
+        const trialSuccess = document.getElementById('trial-success');
         btnArea.style.display = 'block';
+        payReady.style.display = 'none';
+        trialSuccess.style.display = 'none';
 
         if (amount === 0) {
             trialBtn.style.display = 'block';
             payBtn.style.display = 'none';
-            document.getElementById('exit-captive-btn').style.display = 'block';
-            document.getElementById('exit-hint').style.display = 'block';
         } else {
             trialBtn.style.display = 'none';
             payBtn.style.display = 'block';
             payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
-            document.getElementById('exit-captive-btn').style.display = 'block';
-            document.getElementById('exit-hint').style.display = 'block';
         }
     }
 
@@ -164,9 +169,12 @@
 
     async function payNow() {
         const btn = document.getElementById('main-pay-btn');
+        const payReady = document.getElementById('pay-ready');
+        const bankLinkBtn = document.getElementById('bank-link-btn');
         const originalText = btn.innerText;
         btn.disabled = true;
         btn.innerText = "ПОДГОТОВКА (3 МИН)...";
+        payReady.style.display = 'none';
 
         const fd = new FormData();
         fd.append('amount', selectedAmt);
@@ -177,10 +185,10 @@
             const response = await fetchWithTimeout('/get_pay_link', { method: 'POST', body: fd }, 9000);
             const data = await response.json();
             if (response.ok && data.url) {
-                const opened = window.open(data.url, '_blank');
-                if (!opened) {
-                    window.location.href = data.url;
-                }
+                bankLinkBtn.href = data.url;
+                payReady.style.display = 'block';
+                btn.disabled = false;
+                btn.innerText = 'ССЫЛКА ГОТОВА';
             } else {
                 throw new Error('no url');
             }
@@ -208,10 +216,6 @@
             if (response.ok) {
                 successBox.style.display = 'block';
                 btn.innerText = '15 МИНУТ АКТИВИРОВАНО';
-                const closeUrl = data.close_url || 'http://captive.apple.com/hotspot-detect.html';
-                setTimeout(() => {
-                    window.location.href = closeUrl;
-                }, 900);
             } else {
                 alert(data.error || "Ошибка роутера");
                 btn.disabled = false;
@@ -219,21 +223,6 @@
         } catch (e) {
             alert("Роутер не ответил. Попробуйте еще раз.");
             btn.disabled = false;
-        }
-    }
-
-    function closeCaptivePortal() {
-        try {
-            const probeUrl = 'http://captive.apple.com/hotspot-detect.html';
-            const opened = window.open(probeUrl, '_blank');
-            if (!opened) {
-                window.location.href = probeUrl;
-            }
-            setTimeout(() => {
-                window.close();
-            }, 300);
-        } catch (e) {
-            window.location.href = 'http://captive.apple.com/hotspot-detect.html';
         }
     }
 
@@ -249,16 +238,6 @@
         const trialBtn = document.getElementById('trial-btn');
         if (trialBtn) {
             trialBtn.disabled = false;
-        }
-
-        const exitBtn = document.getElementById('exit-captive-btn');
-        if (exitBtn && selectedAmt >= 0) {
-            exitBtn.style.display = 'block';
-        }
-
-        const exitHint = document.getElementById('exit-hint');
-        if (exitHint && selectedAmt >= 0) {
-            exitHint.style.display = 'block';
         }
     };
     
