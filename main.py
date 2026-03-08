@@ -120,33 +120,24 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
         })
 
         host_ip = None
-        host_server = None
         hosts = host_res.call('print', queries={'mac-address': mac})
         if hosts:
             host_ip = hosts[0].get('address')
-            host_server = hosts[0].get('server')
+
+        access_mode = "BYPASS"
 
         if host_ip:
-            login_args = {
-                'user': user_name,
-                'password': user_pass,
-                'mac-address': mac,
-                'ip': host_ip,
-            }
-            if host_server:
-                login_args['server'] = host_server
+            login_args = {'user': user_name, 'password': user_pass, 'mac-address': mac, 'ip': host_ip}
             try:
                 active.call('login', arguments=login_args)
                 active_rows = active.call('print', queries={'mac-address': mac})
                 if active_rows:
-                    logger.info(f"✅ Active login выполнен для {mac} ({host_ip})")
+                    access_mode = "ACTIVE"
                 else:
                     raise RuntimeError("login command finished but active session not found")
-            except Exception as login_error:
-                logger.warning(f"⚠️ Active login не выполнен для {mac}: {login_error}; включаем bypass fallback")
+            except Exception:
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
         else:
-            logger.warning(f"⚠️ Host для MAC {mac} не найден, включаем bypass fallback")
             binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
 
         now = datetime.now(KZ_TZ)
@@ -172,7 +163,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             'comment': f"AUTOCLEAR_{mode}_{mac}",
         })
 
-        logger.info(f"✅ Статус A H ({mode}) активирован на {minutes} мин для {mac}")
+        logger.info(f"✅ Доступ ({mode}) активирован на {minutes} мин для {mac}; mode={access_mode}")
         return True
     except Exception as e:
         logger.exception(f"❌ Ошибка API MikroTik ({router_id}/{config.get('ip')}): {e}")
