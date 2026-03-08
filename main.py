@@ -257,8 +257,8 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
     return RedirectResponse(url=payment_url, status_code=302)
 
 
-@app.post("/activate_welcome")
-async def activate_welcome(mac: str = Form(...), router_id: str = Form("astana_01")):
+@app.get("/activate_welcome")
+async def activate_welcome(mac: str, router_id: str = "astana_01"):
     """Активация 3 минут при первом входе для выбора тарифа"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         return JSONResponse({"error": "Некорректный MAC"}, status_code=400)
@@ -276,7 +276,9 @@ async def activate_welcome(mac: str = Form(...), router_id: str = Form("astana_0
     finally:
         conn.close()
     
-    return {"message": "3 минуты активировано!"}
+    # Redirect to tariffs page
+    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
+    return RedirectResponse(url=tariff_url, status_code=302)
 
 
 @app.post("/get_free_trial")
