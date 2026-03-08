@@ -52,9 +52,15 @@ def init_db():
             amount INTEGER,
             status TEXT,
             router_id TEXT,
+            payment_order_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(orders)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if 'payment_order_id' not in columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN payment_order_id TEXT")
     conn.commit()
     conn.close()
 
@@ -197,10 +203,10 @@ def get_signature(script_name, params, secret_key):
     return hashlib.md5(sig_str.encode('utf-8')).hexdigest()
 
 
-def build_payment_url(amount: int, mac: str, router_id: str) -> str:
+def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str) -> str:
     params = {
         'pg_merchant_id': MERCHANT_ID, 'pg_amount': str(amount), 'pg_currency': 'KZT',
-        'pg_description': f"Wi-Fi {mac}", 'pg_order_id': str(int(time.time())),
+        'pg_description': f"Wi-Fi {mac}", 'pg_order_id': payment_order_id,
         'pg_salt': 'salt', 'pg_param1': mac, 'pg_param2': router_id,
         'pg_result_url': 'https://wifi-pay.kz/payment_result', 'pg_success_url': 'https://wifi-pay.kz/success'
     }
@@ -248,7 +254,18 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
 
-    payment_url = build_payment_url(amount, mac, router_id)
+    payment_order_id = f"{int(time.time())}_{mac.replace(':', '').lower()}"
+    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+    try:
+        conn.execute(
+            "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id) VALUES (?, ?, 'PAYMENT_INITIATED', ?, ?)",
+            (mac, amount, router_id, payment_order_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    payment_url = build_payment_url(amount, mac, router_id, payment_order_id)
     return RedirectResponse(url=payment_url, status_code=302)
 
 
@@ -318,9 +335,25 @@ async def payment_result(request: Request):
             logger.info(f"Payment failed: {params.get('pg_result')}")
             return Response(content="Payment not successful", status_code=400)
 
+        payment_order_id = params.get('pg_order_id', '')
         mac = params.get('pg_param1')
-        router_id = params.get('pg_param2', 'astana_01')
+        router_id = params.get('pg_param2')
         amount = int(float(params.get('pg_amount', 0)))
+
+        if not mac or not router_id:
+            conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+            try:
+                row = conn.execute(
+                    "SELECT mac_address, router_id FROM orders WHERE payment_order_id = ? ORDER BY id DESC LIMIT 1",
+                    (payment_order_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if row:
+                mac = mac or row[0]
+                router_id = router_id or row[1]
+
+        router_id = router_id or 'astana_01'
 
         # Определение времени доступа
         if amount >= 2000:
@@ -338,10 +371,15 @@ async def payment_result(request: Request):
         # Запись в БД
         conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
         try:
-            conn.execute(
-                "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, ?, 'PAID', ?)",
-                (mac, amount, router_id),
-            )
+            updated = conn.execute(
+                "UPDATE orders SET status = 'PAID' WHERE payment_order_id = ?",
+                (payment_order_id,),
+            ).rowcount
+            if not updated:
+                conn.execute(
+                    "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id) VALUES (?, ?, 'PAID', ?, ?)",
+                    (mac, amount, router_id, payment_order_id),
+                )
             conn.commit()
             logger.info(f"Payment processed: {amount}₸ for {mac[:8]}*** ({minutes}min)")
         finally:
