@@ -35,14 +35,18 @@ echo "────────────────────────�
 python3 << 'PYTHON_SCRIPT'
 import routeros_api
 import sys
+import os
 
 MAC = sys.argv[1] if len(sys.argv) > 1 else "22:1D:C8:99:FE:B0"
+ROUTER_IP = os.getenv('ROUTER_IP', '10.0.0.2')
+ROUTER_USER = os.getenv('ROUTER_USER', 'admin')
+ROUTER_PASS = os.getenv('ROUTER_PASS', 'kaspiwifiadmin2026')
 
 try:
     connection = routeros_api.RouterOsApiPool(
-        '10.0.0.2',
-        username='admin',
-        password='kaspiwifiadmin2026',
+        ROUTER_IP,
+        username=ROUTER_USER,
+        password=ROUTER_PASS,
         plaintext_login=True
     )
     api = connection.get_api()

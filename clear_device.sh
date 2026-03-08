@@ -4,9 +4,15 @@
 MAC="${1:-22:1D:C8:99:FE:B0}"
 ROUTER_IP="10.0.0.2"
 ROUTER_USER="admin"
-ROUTER_PASS="kaspiwifiadmin2026"
+SSH_KEY="$HOME/.ssh/mikrotik_key"
 
 echo "🧹 Очистка истории для MAC: $MAC"
+
+# Проверка SSH ключа
+if [ ! -f "$SSH_KEY" ]; then
+    echo "❌ SSH ключ не найден: $SSH_KEY"
+    exit 1
+fi
 
 # Очистка БД
 echo "Удаление записей из БД..."
@@ -17,7 +23,7 @@ echo "✓ БД очищена"
 echo "Очистка MikroTik..."
 MAC_HEX=$(echo $MAC | tr -d ':')
 
-sshpass -p "$ROUTER_PASS" ssh -o StrictHostKeyChecking=no ${ROUTER_USER}@${ROUTER_IP} << EOF
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no ${ROUTER_USER}@${ROUTER_IP} << EOF
 /ip hotspot user remove [find comment~"$MAC"]
 /ip hotspot ip-binding remove [find mac-address="$MAC"]
 /ip hotspot active remove [find mac-address="$MAC"]
