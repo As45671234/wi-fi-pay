@@ -128,61 +128,32 @@
         amtLabel.innerText = (amount === 0) ? "БЕСПЛАТНО" : amount;
     }
     async function payNow() {
-    // Проверка, выбран ли тариф
-    if (selectedAmt < 0) {
-        alert("Пожалуйста, выберите тариф");
-        return;
-    }
-
+    if (selectedAmt < 0) return;
     const btn = document.getElementById('main-pay-btn');
-    const originalText = btn.innerText;
-    
-    // Блокируем кнопку, чтобы избежать двойных нажатий
     btn.disabled = true;
-    btn.innerText = "ПОДОЖДИТЕ...";
+    btn.innerText = "ВКЛЮЧЕНИЕ СЕТИ...";
 
-    // 1. Подготавливаем данные
     const fd = new FormData();
+    fd.append('amount', selectedAmt);
     fd.append('mac', macAddress);
     fd.append('router_id', routerId);
-    
-    // IP твоего роутера (проверь, что в WinBox он именно такой!)
-    const routerIp = "192.168.99.1"; 
 
     try {
-        if (selectedAmt === 0) {
-            // --- ЛОГИКА БЕСПЛАТНОГО ДОСТУПА ---
-            const response = await fetch('/get_free_access', { method: 'POST', body: fd });
-            const data = await response.json();
+        const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
+        const data = await response.json();
 
-            if (response.ok) {
-                // Активируем Trial и перекидываем на страницу успеха
-                window.location.href = `http://${routerIp}/trial?dst=${encodeURIComponent('https://wifi-pay.kz/success')}`;
-            } else {
-                alert(data.error || "Ошибка активации бесплатного доступа");
-                btn.disabled = false;
-                btn.innerText = originalText;
-            }
+        if (data.url) {
+            // ЭТО И ЕСТЬ НАШ ПЛАН:
+            // Мы просим роутер дать Trial и СРАЗУ перекинуть в банк (dst)
+            const routerIp = "192.168.99.1"; 
+            window.location.href = `http://${routerIp}/trial?dst=${encodeURIComponent(data.url)}`;
         } else {
-            // --- ЛОГИКА ПЛАТНОГО ДОСТУПА ---
-            fd.append('amount', selectedAmt);
-            
-            const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
-            const data = await response.json();
-
-            if (data.url) {
-                window.location.href = data.url;
-            } else {
-                alert("Ошибка: Сервер не выдал ссылку на оплату");
-                btn.disabled = false;
-                btn.innerText = originalText;
-            }
+            alert("Ошибка получения ссылки");
+            btn.disabled = false;
         }
     } catch (e) {
-        console.error("Ошибка выполнения payNow:", e);
-        alert("Ошибка сети. Проверьте соединение с Wi-Fi.");
+        alert("Ошибка сети");
         btn.disabled = false;
-        btn.innerText = originalText;
     }
 }
     
