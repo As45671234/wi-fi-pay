@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Wi-Fi Pay - Добро пожаловать</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; color: #ffffff; padding: 20px; }
+        
+        .welcome-card { background: rgba(255, 255, 255, 0.95); border-radius: 2.5rem; box-shadow: 0 20px 60px rgba(0,0,0,0.3); padding: 2.5rem 2rem; width: 90%; max-width: 420px; text-align: center; backdrop-filter: blur(10px); }
+        
+        .logo { margin-bottom: 1.5rem; }
+        .logo svg { width: 80px; height: 80px; filter: drop-shadow(0 4px 8px rgba(59, 130, 246, 0.3)); }
+        
+        h1 { font-size: 1.75rem; font-weight: 800; margin: 0 0 1rem 0; color: #111827; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        
+        .welcome-text { color: #4b5563; font-size: 1rem; line-height: 1.6; margin-bottom: 2rem; padding: 0 10px; }
+        .welcome-text strong { color: #111827; }
+        
+        .features { text-align: left; margin-bottom: 2rem; background: #f9fafb; border-radius: 1.5rem; padding: 1.5rem; }
+        .feature-item { display: flex; align-items: center; margin-bottom: 1rem; color: #374151; font-size: 0.95rem; }
+        .feature-item:last-child { margin-bottom: 0; }
+        .feature-icon { color: #10b981; margin-right: 12px; font-size: 1.3rem; }
+        
+        .btn-start { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; width: 100%; padding: 1.3rem; border-radius: 1.5rem; font-size: 1.1rem; font-weight: 700; cursor: pointer; box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4); transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.5px; }
+        .btn-start:active { transform: scale(0.98); }
+        .btn-start:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        .bonus { margin-top: 1.5rem; padding: 1rem; background: #eff6ff; border-radius: 1rem; border: 2px solid #bfdbfe; }
+        .bonus-title { font-weight: 700; color: #1e40af; font-size: 0.9rem; margin-bottom: 0.3rem; }
+        .bonus-text { color: #3b82f6; font-size: 0.85rem; }
+        
+        .mac-id { font-size: 0.7rem; color: #9ca3af; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
+        
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+        .btn-start:not(:disabled):hover { animation: pulse 2s infinite; }
+    </style>
+</head>
+<body>
+
+    <div class="welcome-card">
+        <div class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="url(#gradient)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <defs>
+                    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+                    </linearGradient>
+                </defs>
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                <line x1="12" y1="20" x2="12.01" y2="20"></line>
+            </svg>
+        </div>
+        
+        <h1>Добро пожаловать!</h1>
+        
+        <div class="welcome-text">
+            Вы подключились к <strong>высокоскоростному Wi-Fi</strong>. Для доступа в интернет выберите удобный тариф и оплатите картой любого банка.
+        </div>
+        
+        <div class="features">
+            <div class="feature-item">
+                <span class="feature-icon">✓</span>
+                <span>Мгновенная активация доступа</span>
+            </div>
+            <div class="feature-item">
+                <span class="feature-icon">✓</span>
+                <span>Безопасная оплата онлайн</span>
+            </div>
+            <div class="feature-item">
+                <span class="feature-icon">✓</span>
+                <span>Гибкие тарифы от 1 часа до суток</span>
+            </div>
+        </div>
+        
+        <button class="btn-start" id="start-btn" onclick="activateAndContinue()">Продолжить</button>
+        
+        <div class="bonus">
+            <div class="bonus-title">🎁 Бонус при входе</div>
+            <div class="bonus-text">3 минуты доступа для выбора тарифа</div>
+        </div>
+        
+        <div class="mac-id">ID: {{ mac }}</div>
+    </div>
+
+    <script>
+    'use strict';
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const macAddress = urlParams.get('mac') || "{{ mac }}";
+    const routerId = urlParams.get('router_id') || "{{ router_id }}";
+
+    async function activateAndContinue() {
+        const btn = document.getElementById('start-btn');
+        btn.disabled = true;
+        btn.innerText = 'Активация 3 минут...';
+
+        try {
+            const response = await fetch('/activate_welcome', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`
+            });
+
+            if (response.ok) {
+                // Redirect to tariffs page
+                window.location.href = `/tariffs?mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка активации');
+                btn.disabled = false;
+                btn.innerText = 'Продолжить';
+            }
+        } catch (e) {
+            alert('Ошибка соединения. Попробуйте еще раз.');
+            btn.disabled = false;
+            btn.innerText = 'Продолжить';
+        }
+    }
+    </script>
+
+</body>
+</html>

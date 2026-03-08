@@ -208,7 +208,17 @@ def build_payment_url(amount: int, mac: str, router_id: str) -> str:
     return f"{PAY_URL}?{urlencode(params)}"
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+    return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id})
+
+
+@app.get("/tariffs", response_class=HTMLResponse)
+async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+    return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id})
+
+
+@app.get("/tariffs", response_class=HTMLResponse)
+async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("index.html", {"request": request, "mac": mac, "router_id": router_id})
 
 
@@ -245,6 +255,28 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
 
     payment_url = build_payment_url(amount, mac, router_id)
     return RedirectResponse(url=payment_url, status_code=302)
+
+
+@app.post("/activate_welcome")
+async def activate_welcome(mac: str = Form(...), router_id: str = Form("astana_01")):
+    """Активация 3 минут при первом входе для выбора тарифа"""
+    if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
+        return JSONResponse({"error": "Некорректный MAC"}, status_code=400)
+    
+    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
+        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
+    
+    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+    try:
+        conn.execute(
+            "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, 0, 'PAY_WINDOW', ?)",
+            (mac, router_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    
+    return {"message": "3 минуты активировано!"}
 
 
 @app.post("/get_free_trial")
