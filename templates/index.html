@@ -25,6 +25,9 @@
         
         .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
         .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
+        .trial-success { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
+        .trial-success-title { font-weight: 700; margin-bottom: 0.35rem; }
+        .trial-success-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
         
@@ -82,6 +85,11 @@
         <div id="pay-btn-area">
             <button class="btn" id="main-pay-btn" onclick="payNow()" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</button>
             <button class="btn" id="trial-btn" onclick="getTrial()" style="display: none;">ПОЛУЧИТЬ 15 МИНУТ БЕСПЛАТНО</button>
+            <div id="trial-success" class="trial-success">
+                <div class="trial-success-title">Доступ открыт на 15 минут</div>
+                <div class="trial-success-text">Нажмите «Готово» вверху справа. Если кнопки нет — нажмите «Закрыть окно» ниже.</div>
+                <button class="btn" type="button" onclick="closeCaptivePortal()">ЗАКРЫТЬ ОКНО</button>
+            </div>
         </div>
         
         <div class="mac-id">ID: {{ mac }}</div>
@@ -175,7 +183,9 @@
 
     async function getTrial() {
         const btn = document.getElementById('trial-btn');
+        const successBox = document.getElementById('trial-success');
         btn.disabled = true;
+        successBox.style.display = 'none';
 
         const fd = new FormData();
         fd.append('mac', macAddress);
@@ -186,7 +196,8 @@
             const data = await response.json();
 
             if (response.ok) {
-                alert(data.message);
+                successBox.style.display = 'block';
+                btn.innerText = '15 МИНУТ АКТИВИРОВАНО';
             } else {
                 alert(data.error || "Ошибка роутера");
                 btn.disabled = false;
@@ -194,6 +205,17 @@
         } catch (e) {
             alert("Роутер не ответил. Попробуйте еще раз.");
             btn.disabled = false;
+        }
+    }
+
+    function closeCaptivePortal() {
+        try {
+            window.location.href = 'http://captive.apple.com/hotspot-detect.html';
+            setTimeout(() => {
+                window.close();
+            }, 300);
+        } catch (e) {
+            window.location.href = 'http://captive.apple.com/hotspot-detect.html';
         }
     }
 

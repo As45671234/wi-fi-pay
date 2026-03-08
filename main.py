@@ -97,14 +97,47 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
 
         binding = api.get_resource('/ip/hotspot/ip-binding')
         active = api.get_resource('/ip/hotspot/active')
+        user_res = api.get_resource('/ip/hotspot/user')
+        host_res = api.get_resource('/ip/hotspot/host')
         sched = api.get_resource('/system/scheduler')
+
+        user_name = f"T-{mac.replace(':', '')}"
+        user_pass = f"p{int(time.time()) % 1000000}"
 
         for b in binding.get(mac_address=mac):
             binding.remove(id=b['id'])
         for a in active.get(mac_address=mac):
             active.remove(id=a['id'])
+        for u in user_res.get(name=user_name):
+            user_res.remove(id=u['id'])
+
+        user_res.add(name=user_name, password=user_pass, limit_uptime=f"{minutes}m", comment=f"{mode}_{mac}")
 
         binding.add(mac_address=mac, type='bypassed', comment=f"{mode}_{mac}")
+
+        host_ip = None
+        host_server = None
+        hosts = host_res.get(mac_address=mac)
+        if hosts:
+            host_ip = hosts[0].get('address')
+            host_server = hosts[0].get('server')
+
+        if host_ip:
+            login_args = {
+                'user': user_name,
+                'password': user_pass,
+                'mac_address': mac,
+                'ip': host_ip,
+            }
+            if host_server:
+                login_args['server'] = host_server
+            try:
+                active.call('login', arguments=login_args)
+                logger.info(f"✅ Active login выполнен для {mac} ({host_ip})")
+            except Exception as login_error:
+                logger.warning(f"⚠️ Active login не выполнен для {mac}: {login_error}")
+        else:
+            logger.warning(f"⚠️ Host для MAC {mac} не найден, оставлен bypass fallback")
 
         now = datetime.now(KZ_TZ)
         expiry = now + timedelta(minutes=minutes)
@@ -117,6 +150,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
 
         on_event = (
             f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
+            f'/ip hotspot user remove [find name="{user_name}"]; '
             f'/system scheduler remove [find name="{task_name}"];'
         )
         sched.add(
