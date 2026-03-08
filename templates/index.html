@@ -107,6 +107,25 @@
     </div>
 
     <script>
+        // 1. Создаем глобальную переменную
+        let currentMacAddress = "{{ mac }}";
+
+        // 2. Проверяем: не вернул ли нас роутер с готовым MAC-адресом в ссылке?
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlMac = urlParams.get('mac');
+
+        if (urlMac) {
+            // Если в ссылке есть MAC (http://wifi-pay.kz/?mac=...), используем его
+            currentMacAddress = urlMac;
+            // Обновляем текст на экране
+            document.addEventListener("DOMContentLoaded", () => {
+                document.querySelector('.mac-id').innerText = "ID: " + currentMacAddress;
+            });
+        } else if (!currentMacAddress || currentMacAddress === "00:00:00:00:00:00" || currentMacAddress === "{{ mac }}") {
+            // 3. Если мака нет ни в шаблоне, ни в ссылке — отправляем пользователя к роутеру "спросить" MAC
+            window.location.replace("http://192.168.88.1/getmac.html");
+        }
+
         let selectedAmt = -1;
 
         // Функция выбора тарифа
@@ -140,13 +159,22 @@
             btn.disabled = true;
             btn.innerText = "ПОДОЖДИТЕ...";
 
-            const macAddress = "{{ mac }}";
+            // Используем нашу новую "умную" переменную вместо старой const macAddress
+            const finalMac = currentMacAddress;
+
+            // Защита от дурака: если после всех попыток мака все равно нет
+            if (!finalMac || finalMac === "00:00:00:00:00:00") {
+                alert("Ошибка: Не удалось определить устройство. Подключитесь к Wi-Fi заново.");
+                btn.disabled = false;
+                btn.innerText = "ОПЛАТИТЬ " + selectedAmt + " ₸";
+                return;
+            }
 
             if (selectedAmt === 0) {
                 // БЕСПЛАТНЫЙ ТАРИФ
                 try {
                     const fd = new FormData();
-                    fd.append('mac', macAddress);
+                    fd.append('mac', finalMac);
                     const response = await fetch('/get_free_access', { method: 'POST', body: fd });
                     const data = await response.json();
 
@@ -166,7 +194,7 @@
                 try {
                     const fd = new FormData();
                     fd.append('amount', selectedAmt);
-                    fd.append('mac', macAddress);
+                    fd.append('mac', finalMac);
 
                     const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
                     const data = await response.json();
@@ -181,8 +209,7 @@
                     alert("Ошибка сети");
                 } finally {
                     btn.disabled = false;
-                    btn.innerTex
-                    t = "ОПЛАТИТЬ " + selectedAmt + " ₸";
+                    btn.innerText = "ОПЛАТИТЬ " + selectedAmt + " ₸";
                 }
             }
         }
