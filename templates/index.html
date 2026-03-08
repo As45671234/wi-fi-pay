@@ -14,6 +14,7 @@
         
         .tariff-list { text-align: left; margin-bottom: 1.5rem; }
         .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; padding: 1.2rem; border-radius: 1.2rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s ease; }
+        .tariff-link { text-decoration: none; }
         .tariff-card:active { transform: scale(0.98); }
         .tariff-card.active { border-color: #3b82f6; background-color: #f0f7ff; }
         
@@ -67,24 +68,23 @@
                 <span class="t-price">0 ₸</span>
             </div>
             <!-- 1 час -->
-            <div onclick="selectT(490, this)" class="tariff-card">
+            <a class="tariff-card tariff-link" target="_blank" rel="noopener noreferrer" href="https://wifi-pay.kz/start_payment?amount=490&mac={{ mac }}&router_id={{ router_id }}">
                 <span class="t-name">1 час доступа</span>
                 <span class="t-price">490 ₸</span>
-            </div>
+            </a>
             <!-- 3 часа -->
-            <div onclick="selectT(990, this)" class="tariff-card">
+            <a class="tariff-card tariff-link" target="_blank" rel="noopener noreferrer" href="https://wifi-pay.kz/start_payment?amount=990&mac={{ mac }}&router_id={{ router_id }}">
                 <span class="t-name">3 часа доступа</span>
                 <span class="t-price">990 ₸</span>
-            </div>
+            </a>
             <!-- Безлимит на день -->
-            <div onclick="selectT(2490, this)" class="tariff-card">
+            <a class="tariff-card tariff-link" target="_blank" rel="noopener noreferrer" href="https://wifi-pay.kz/start_payment?amount=2490&mac={{ mac }}&router_id={{ router_id }}">
                 <span class="t-name">Безлимит на день</span>
                 <span class="t-price">2490 ₸</span>
-            </div>
+            </a>
         </div>
 
         <div id="pay-btn-area">
-            <a class="btn btn-link" id="main-pay-link" href="#" target="_blank" rel="noopener noreferrer" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</a>
             <button class="btn" id="trial-btn" onclick="getTrial()" style="display: none;">ПОЛУЧИТЬ 15 МИНУТ БЕСПЛАТНО</button>
             <div id="trial-success" class="trial-success">
                 <div class="trial-success-title">Доступ открыт на 15 минут</div>
@@ -131,7 +131,6 @@
         element.classList.add('active');
         
         const btnArea = document.getElementById('pay-btn-area');
-        const payLink = document.getElementById('main-pay-link');
         const trialBtn = document.getElementById('trial-btn');
         const trialSuccess = document.getElementById('trial-success');
         btnArea.style.display = 'block';
@@ -139,12 +138,8 @@
 
         if (amount === 0) {
             trialBtn.style.display = 'block';
-            payLink.style.display = 'none';
         } else {
             trialBtn.style.display = 'none';
-            payLink.style.display = 'block';
-            payLink.textContent = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
-            payLink.href = `/start_payment?amount=${encodeURIComponent(amount)}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
         }
     }
 
