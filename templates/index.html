@@ -171,11 +171,7 @@
             const data = await response.json();
 
             if (data.url) {
-                btn.innerText = "ВКЛЮЧЕНИЕ СЕТИ...";
-                
-                // Используем эндпоинт /trial — это самый надежный способ в MikroTik.
-                // Роутер даст 3 минуты интернета и сам перенаправит тебя на оплату (data.url).
-                window.location.href = `http://${routerIp}/trial?dst=${encodeURIComponent(data.url)}`;
+                window.location.href = data.url;
             } else {
                 alert("Ошибка: Сервер не выдал ссылку на оплату");
                 btn.disabled = false;
