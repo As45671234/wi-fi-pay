@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request, Form, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import routeros_api
@@ -181,9 +181,48 @@ def get_signature(script_name, params, secret_key):
     sig_str = f"{script_name};{';'.join(values)};{secret_key}"
     return hashlib.md5(sig_str.encode('utf-8')).hexdigest()
 
+
+def build_payment_url(amount: int, mac: str, router_id: str) -> str:
+    params = {
+        'pg_merchant_id': MERCHANT_ID, 'pg_amount': str(amount), 'pg_currency': 'KZT',
+        'pg_description': f"Wi-Fi {mac}", 'pg_order_id': str(int(time.time())),
+        'pg_salt': 'salt', 'pg_param1': mac, 'pg_param2': router_id,
+        'pg_result_url': 'https://wifi-pay.kz/payment_result', 'pg_success_url': 'https://wifi-pay.kz/success'
+    }
+    params['pg_sig'] = get_signature("payment.php", params, SECRET_KEY)
+    return f"{PAY_URL}?{urlencode(params)}"
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("index.html", {"request": request, "mac": mac, "router_id": router_id})
+
+
+@app.get("/payment_methods", response_class=HTMLResponse)
+@app.get("/payment_methods.html", response_class=HTMLResponse)
+async def payment_methods_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+    return templates.TemplateResponse("payment_methods.html", {"request": request, "mac": mac, "router_id": router_id})
+
+
+@app.get("/offer", response_class=HTMLResponse)
+@app.get("/offer.html", response_class=HTMLResponse)
+async def offer_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+    return templates.TemplateResponse("offer.html", {"request": request, "mac": mac, "router_id": router_id})
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+@app.get("/privacy.html", response_class=HTMLResponse)
+async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+    return templates.TemplateResponse("privacy.html", {"request": request, "mac": mac, "router_id": router_id})
+
+
+@app.get("/start_payment")
+async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
+    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
+        return JSONResponse({"error": "Роутер недоступен или MAC некорректен"}, status_code=500)
+
+    payment_url = build_payment_url(amount, mac, router_id)
+    logger.info(f"Redirect payment URL for {mac}: {payment_url}")
+    return RedirectResponse(url=payment_url, status_code=302)
 
 
 @app.post("/get_free_trial")
@@ -215,14 +254,7 @@ async def get_pay_link(amount: int = Form(...), mac: str = Form(...), router_id:
         return JSONResponse({"error": "Роутер недоступен или MAC некорректен"}, status_code=500)
 
     # ШАГ 2: Ссылка в банк
-    params = {
-        'pg_merchant_id': MERCHANT_ID, 'pg_amount': str(amount), 'pg_currency': 'KZT',
-        'pg_description': f"Wi-Fi {mac}", 'pg_order_id': str(int(time.time())),
-        'pg_salt': 'salt', 'pg_param1': mac, 'pg_param2': router_id,
-        'pg_result_url': 'https://wifi-pay.kz/payment_result', 'pg_success_url': 'https://wifi-pay.kz/success'
-    }
-    params['pg_sig'] = get_signature("payment.php", params, SECRET_KEY)
-    payment_url = f"{PAY_URL}?{urlencode(params)}"
+    payment_url = build_payment_url(amount, mac, router_id)
     logger.info(f"Payment URL for {mac}: {payment_url}")
     response_data = {"url": payment_url, "status": "ok"}
     logger.info(f"Returning response: {response_data}")

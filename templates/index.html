@@ -107,9 +107,9 @@
         <div class="f-line"></div>
         <div class="f-title">ИП КАЛКИЕВ</div>
         <div class="f-links">
-            <a href="/payment_methods">Оплата и Возврат</a>
-            <a href="/offer">Оферта</a>
-            <a href="/privacy">Приватность</a>
+            <a href="/payment_methods?mac={{ mac }}&router_id={{ router_id }}" target="_blank" rel="noopener noreferrer">Оплата и Возврат</a>
+            <a href="/offer?mac={{ mac }}&router_id={{ router_id }}" target="_blank" rel="noopener noreferrer">Оферта</a>
+            <a href="/privacy?mac={{ mac }}&router_id={{ router_id }}" target="_blank" rel="noopener noreferrer">Приватность</a>
         </div>
         <div class="f-email">sanatkalkiyev@gmail.com | © 2026 Wi-Fi Pay</div>
     </div>
@@ -162,46 +162,8 @@
         btn.disabled = true;
         btn.innerText = "ПОДГОТОВКА (3 МИН)...";
 
-        const fd = new FormData();
-        fd.append('amount', selectedAmt);
-        fd.append('mac', macAddress);
-        fd.append('router_id', routerId);
-
-        try {
-            console.log("1. Отправляю запрос платежа для суммы:", selectedAmt);
-            
-            const response = await fetchWithTimeout('/get_pay_link', { method: 'POST', body: fd }, 9000);
-            console.log("2. Получен ответ. Status:", response.status, "OK:", response.ok);
-            
-            const text = await response.text();
-            console.log("3. Текст ответа:", text.substring(0, 200)); // первые 200 символов
-            
-            let data = JSON.parse(text);
-            console.log("4. Распарсен JSON. URL присутствует:", !!data.url);
-            
-            if (!data.url) {
-                throw new Error('URL отсутствует: ' + JSON.stringify(data));
-            }
-            
-            console.log("5. URL получен, длина:", data.url.length);
-            console.log("6. Попытка редиректа на:", data.url.substring(0, 100) + "...");
-            
-            // Сначала пробуем прямой редирект
-            window.location.href = data.url;
-            
-            // На случай если прямой редирект не сработал через 2 сек, пробуем новое окно
-            setTimeout(() => {
-                console.log("7. Прямой редирект не сработал, пробуем window.open");
-                window.open(data.url, '_blank');
-            }, 2000);
-            
-        } catch (e) {
-            console.error("ОШИБКА в payNow:", e.message);
-            console.error("Stack:", e.stack);
-            alert("Ошибка платежа: " + e.message);
-            btn.disabled = false;
-            btn.innerText = originalText;
-        }
+        const redirectUrl = `/start_payment?amount=${encodeURIComponent(selectedAmt)}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
+        window.location.href = redirectUrl;
     }
 
     async function getTrial() {
