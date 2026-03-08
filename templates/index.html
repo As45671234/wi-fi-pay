@@ -128,31 +128,36 @@
         amtLabel.innerText = (amount === 0) ? "БЕСПЛАТНО" : amount;
     }
     async function payNow() {
-    if (selectedAmt < 0) return;
-    const btn = document.getElementById('main-pay-btn');
-    btn.disabled = true;
-    btn.innerText = "ПОДГОТОВКА СЕТИ...";
+        if (selectedAmt < 0) return;
+        const btn = document.getElementById('main-pay-btn');
+        btn.disabled = true;
+        btn.innerText = "ВКЛЮЧЕНИЕ СЕТИ (3 МИН)...";
 
-    const fd = new FormData();
-    fd.append('amount', selectedAmt);
-    fd.append('mac', macAddress);
-    fd.append('router_id', routerId);
+        const fd = new FormData();
+        fd.append('amount', selectedAmt);
+        fd.append('mac', macAddress);
+        fd.append('router_id', routerId);
 
-    try {
-        const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
-        const data = await response.json();
+        try {
+            const response = await fetch('/get_pay_link', { method: 'POST', body: fd });
+            const data = await response.json();
 
-        if (data.url) {
-            window.location.href = data.url;
-        } else {
-            alert("Ошибка получения ссылки");
+            if (data.url) {
+                // ЭТО КЛЮЧЕВОЙ МОМЕНТ:
+                // Мы просим роутер дать Trial и СРАЗУ перекинуть в банк (dst)
+                // Когда роутер даст Trial, iPhone увидит интернет и 
+                // кнопка "Отмена" в углу сменится на "Готово".
+                const routerIp = "192.168.99.1"; 
+                window.location.href = `http://${routerIp}/trial?dst=${encodeURIComponent(data.url)}`;
+            } else {
+                alert("Ошибка: Сервер не выдал ссылку");
+                btn.disabled = false;
+            }
+        } catch (e) {
+            alert("Ошибка сети. Убедитесь, что вы подключены к Wi-Fi");
             btn.disabled = false;
         }
-    } catch (e) {
-        alert("Ошибка связи");
-        btn.disabled = false;
     }
-}
     
     function closeP() {
         document.getElementById('overlay').style.display = 'none';
