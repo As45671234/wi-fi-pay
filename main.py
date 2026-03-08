@@ -245,7 +245,7 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
     """Активирует окно оплаты и редиректит на FreedomPay"""
     # Валидация
-    if amount not in [5, 990, 2490]:
+    if amount not in [100, 990, 2490]:
         return JSONResponse({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
