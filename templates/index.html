@@ -131,7 +131,7 @@
     if (selectedAmt < 0) return;
     const btn = document.getElementById('main-pay-btn');
     btn.disabled = true;
-    btn.innerText = "ВКЛЮЧЕНИЕ СЕТИ...";
+    btn.innerText = "ПОДГОТОВКА СЕТИ...";
 
     const fd = new FormData();
     fd.append('amount', selectedAmt);
@@ -143,17 +143,15 @@
         const data = await response.json();
 
         if (data.url) {
-            // ЭТО КЛЮЧЕВОЙ МОМЕНТ ПЛАНА:
-            // Мы вызываем /trial, роутер дает 3 минуты и редиректит в банк (dst).
-            // В этот момент Captive Portal на телефоне "отпускает" пользователя.
-            const routerIp = "192.168.99.1"; 
+            const routerIp = "192.168.99.1";
+            // Роутер дает пробный доступ и сразу перенаправляет на оплату (dst)
             window.location.href = `http://${routerIp}/trial?dst=${encodeURIComponent(data.url)}`;
         } else {
-            alert("Ошибка связи с сервером");
+            alert("Ошибка сервера");
             btn.disabled = false;
         }
     } catch (e) {
-        alert("Ошибка сети. Убедитесь, что вы в Wi-Fi сети.");
+        alert("Ошибка связи");
         btn.disabled = false;
     }
 }
