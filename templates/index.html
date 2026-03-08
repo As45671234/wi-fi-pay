@@ -24,14 +24,10 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
         .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
-        a.btn { display: block; text-decoration: none; text-align: center; }
         .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
         .trial-success { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
         .trial-success-title { font-weight: 700; margin-bottom: 0.35rem; }
         .trial-success-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
-        .pay-ready { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
-        .pay-ready-title { font-weight: 700; margin-bottom: 0.35rem; }
-        .pay-ready-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
         
@@ -93,11 +89,6 @@
                 <div class="trial-success-title">Доступ открыт на 15 минут</div>
                 <div class="trial-success-text">Нажмите «Готово» вверху справа и продолжайте пользоваться интернетом.</div>
             </div>
-            <div id="pay-ready" class="pay-ready">
-                <div class="pay-ready-title">Окно оплаты открыто на 3 минуты</div>
-                <div class="pay-ready-text">Нажмите кнопку ниже — банк откроется в браузере.</div>
-                <a id="bank-link-btn" class="btn" href="#" target="_blank" rel="noopener noreferrer">ОТКРЫТЬ БАНК В БРАУЗЕРЕ</a>
-            </div>
         </div>
         
         <div class="mac-id">ID: {{ mac }}</div>
@@ -141,10 +132,8 @@
         const btnArea = document.getElementById('pay-btn-area');
         const payBtn = document.getElementById('main-pay-btn');
         const trialBtn = document.getElementById('trial-btn');
-        const payReady = document.getElementById('pay-ready');
         const trialSuccess = document.getElementById('trial-success');
         btnArea.style.display = 'block';
-        payReady.style.display = 'none';
         trialSuccess.style.display = 'none';
 
         if (amount === 0) {
@@ -169,12 +158,9 @@
 
     async function payNow() {
         const btn = document.getElementById('main-pay-btn');
-        const payReady = document.getElementById('pay-ready');
-        const bankLinkBtn = document.getElementById('bank-link-btn');
         const originalText = btn.innerText;
         btn.disabled = true;
         btn.innerText = "ПОДГОТОВКА (3 МИН)...";
-        payReady.style.display = 'none';
 
         const fd = new FormData();
         fd.append('amount', selectedAmt);
@@ -185,10 +171,7 @@
             const response = await fetchWithTimeout('/get_pay_link', { method: 'POST', body: fd }, 9000);
             const data = await response.json();
             if (response.ok && data.url) {
-                bankLinkBtn.href = data.url;
-                payReady.style.display = 'block';
-                btn.disabled = false;
-                btn.innerText = 'ССЫЛКА ГОТОВА';
+                window.location.href = data.url;
             } else {
                 throw new Error('no url');
             }
