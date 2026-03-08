@@ -135,7 +135,7 @@
         if (selectedAmt < 0) return;
         const btn = document.getElementById('main-pay-btn');
         btn.disabled = true;
-        btn.innerText = "ПОДОЖДИТЕ...";
+        btn.innerText = "ПОЛУЧЕНИЕ ДОСТУПА...";
 
         const fd = new FormData();
         fd.append('amount', selectedAmt);
@@ -147,16 +147,20 @@
             const data = await response.json();
 
             if (data.url) {
-                // ИСПОЛЬЗУЕМ СПЕЦИАЛЬНЫЙ ЭНДПОИНТ /trial ДЛЯ РОУТЕРА
-                // Это даст 3 минуты интернета и перекинет на оплату
-                const routerIp = "192.168.99.1"; // Твой IP из WinBox
-                window.location.href = `http://${routerIp}/trial?dst=${encodeURIComponent(data.url)}`;
+                // 1. Убираем двоеточия из MAC (MikroTik требует чистый логин)
+                const cleanMac = macAddress.replace(/:/g, "");
+                const trialLogin = "T-" + cleanMac;
+                
+                // 2. Используем твой реальный IP роутера 192.168.99.1
+                // Эта команда дает 3 минуты интернета и СРАЗУ перекидывает по ссылке банка (data.url)
+                const routerIp = "192.168.99.1";
+                window.location.href = `http://${routerIp}/login?username=${trialLogin}&dst=${encodeURIComponent(data.url)}`;
             } else {
-                alert("Ошибка ссылки");
+                alert("Ошибка: Сервер не выдал ссылку");
                 btn.disabled = false;
             }
         } catch (e) {
-            alert("Ошибка сети или сервер недоступен");
+            alert("Ошибка сети");
             btn.disabled = false;
         }
     }
