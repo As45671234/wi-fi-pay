@@ -221,7 +221,9 @@ async def get_pay_link(amount: int = Form(...), mac: str = Form(...), router_id:
         'pg_result_url': 'https://wifi-pay.kz/payment_result', 'pg_success_url': 'https://wifi-pay.kz/success'
     }
     params['pg_sig'] = get_signature("payment.php", params, SECRET_KEY)
-    return {"url": f"{PAY_URL}?{urlencode(params)}"}
+    payment_url = f"{PAY_URL}?{urlencode(params)}"
+    logger.info(f"Payment URL for {mac}: {payment_url}")
+    return {"url": payment_url}
 
 
 @app.post("/payment_result")
