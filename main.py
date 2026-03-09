@@ -220,7 +220,11 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
 
 @app.get("/tariffs", response_class=HTMLResponse)
 async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
-    return templates.TemplateResponse("index.html", {"request": request, "mac": mac, "router_id": router_id})
+    response = templates.TemplateResponse("index.html", {"request": request, "mac": mac, "router_id": router_id})
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.get("/payment_methods", response_class=HTMLResponse)
@@ -245,7 +249,7 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
     """Активирует окно оплаты и редиректит на FreedomPay"""
     # Валидация
-    if amount not in [490, 990, 2490]:
+    if amount not in [100, 490, 990, 2490]:
         return JSONResponse({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
