@@ -79,12 +79,20 @@
     const urlParams = new URLSearchParams(window.location.search);
     const macAddress = urlParams.get('mac') || "{{ mac }}";
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
+    const isAndroid = /android/i.test(navigator.userAgent || '');
     
     // Update link href if URL params exist
     if (macAddress && routerId) {
         const link = document.querySelector('.btn-start');
         if (link) {
-            link.href = `/activate_welcome?mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
+            const activatePath = `/activate_welcome?mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
+
+            if (isAndroid) {
+                const fallbackUrl = `https://wifi-pay.kz${activatePath}`;
+                link.href = `intent://wifi-pay.kz${activatePath}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
+            } else {
+                link.href = activatePath;
+            }
         }
     }
     </script>

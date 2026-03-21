@@ -284,39 +284,7 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
         conn.close()
 
     payment_url = build_payment_url(amount, mac, router_id, payment_order_id)
-    safe_payment_url = payment_url.replace("&", "&amp;")
-    html = f"""
-    <!DOCTYPE html>
-    <html lang=\"ru\">
-    <head>
-        <meta charset=\"UTF-8\" />
-        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-        <title>Подготовка оплаты</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f8fafc; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }}
-            .card {{ width:min(420px, 92vw); background:#fff; border:1px solid #e5e7eb; border-radius:20px; padding:24px; text-align:center; }}
-            .title {{ margin:0 0 8px; font-size:20px; font-weight:700; color:#111827; }}
-            .text {{ margin:0 0 16px; color:#6b7280; font-size:14px; line-height:1.4; }}
-            .bar {{ height:8px; border-radius:999px; overflow:hidden; background:#e5e7eb; margin-bottom:16px; }}
-            .bar > div {{ height:100%; width:0; background:#2563eb; animation:fill 1.6s linear forwards; }}
-            .btn {{ display:block; text-decoration:none; background:#1c75ff; color:#fff; padding:12px 14px; border-radius:12px; font-weight:700; }}
-            @keyframes fill {{ from {{ width:0; }} to {{ width:100%; }} }}
-        </style>
-        <script>
-            setTimeout(function() {{ window.location.replace('{payment_url}'); }}, 1600);
-        </script>
-    </head>
-    <body>
-        <div class=\"card\">
-            <h1 class=\"title\">Готовим оплату</h1>
-            <p class=\"text\">Подождите 1-2 секунды, настраиваем доступ к платежной странице.</p>
-            <div class=\"bar\"><div></div></div>
-            <a class=\"btn\" href=\"{safe_payment_url}\">Открыть оплату сейчас</a>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html, status_code=200)
+    return RedirectResponse(url=payment_url, status_code=302)
 
 
 @app.get("/activate_welcome")
