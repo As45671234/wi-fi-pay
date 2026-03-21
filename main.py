@@ -209,8 +209,10 @@ def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: s
         minutes = 1440
     elif amount >= 900:
         minutes = 180
-    else:
+    elif amount >= 400:
         minutes = 60
+    else:
+        minutes = 5  # тест 100₸
     success_url = (
         f"https://wifi-pay.kz/success?"
         + urlencode({'mac': mac, 'router_id': router_id, 'minutes': minutes, 'amount': amount})
@@ -261,7 +263,7 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
     """Активирует окно оплаты и редиректит на FreedomPay"""
     # Валидация
-    if amount not in [100, 490, 990, 2490]:
+    if amount not in [100, 490, 990, 2490]:  # 100 = тест 5мин
         return JSONResponse({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
@@ -389,8 +391,10 @@ async def payment_result(request: Request):
             minutes = 1440  # 24 часа
         elif amount >= 900:
             minutes = 180   # 3 часа
-        else:
+        elif amount >= 400:
             minutes = 60    # 1 час
+        else:
+            minutes = 5     # тест 100₸
 
         # Активация доступа
         if not mac or not set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID"):
