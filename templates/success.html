@@ -108,7 +108,6 @@ const AMOUNT = parseInt("{{ amount }}", 10) || 0;
 
 // Названия тарифов
 function tariffName(minutes) {
-    if (minutes <= 5)    return "5 минут доступа";
     if (minutes >= 1440) return "Безлимит на день";
     if (minutes >= 180)  return "3 часа доступа";
     return "1 час доступа";
