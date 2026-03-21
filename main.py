@@ -289,22 +289,9 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
 
 @app.get("/activate_welcome")
 async def activate_welcome(mac: str, router_id: str = "astana_01"):
-    """Активация 3 минут для просмотра тарифов (с Walled Garden для Android)"""
+    """Переход к тарифам без выдачи доступа (Android captive portal friendly)"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         return JSONResponse({"error": "Некорректный MAC"}, status_code=400)
-    
-    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
-    
-    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, 0, 'PAY_WINDOW', ?)",
-            (mac, router_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
     return RedirectResponse(url=tariff_url, status_code=302)
