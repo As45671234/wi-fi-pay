@@ -171,6 +171,8 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
 
         on_event = (
             f'/ip hotspot active remove [find mac-address="{mac}"]; '
+            f'/ip hotspot cookie remove [find user="{user_name}"]; '
+            f'/ip hotspot host remove [find mac-address="{mac}"]; '
             f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
             f'/ip hotspot user remove [find name="{user_name}"]; '
             f'/system scheduler remove [find name="{task_name}"];'
