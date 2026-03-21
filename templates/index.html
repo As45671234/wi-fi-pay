@@ -114,6 +114,9 @@
     const urlParams = new URLSearchParams(window.location.search);
     const macAddress = urlParams.get('mac') || "{{ mac }}";
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
+    const userAgent = navigator.userAgent || '';
+    const isAndroid = /android/i.test(userAgent);
+    const isIOS = /iPad|iPhone|iPod/i.test(userAgent);
 
     function selectT(amount, element) {
         selectedAmt = amount;
@@ -153,12 +156,28 @@
         btn.disabled = true;
         btn.innerText = "ПОДГОТОВКА (3 МИН)...";
 
-        // iOS captive portal requires target="_blank" to open Safari
         const payUrl = `/start_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
+
+        // Android works better with a normal same-tab navigation after opening the browser.
+        if (isAndroid) {
+            window.location.href = payUrl;
+            return;
+        }
+
+        // iOS captive portal requires target="_blank" to open Safari.
+        if (isIOS) {
+            const link = document.createElement('a');
+            link.href = payUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            return;
+        }
+
         const link = document.createElement('a');
         link.href = payUrl;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
