@@ -144,24 +144,26 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             })
 
             host_ip = None
-            hosts = host_res.call('print', queries={'mac-address': mac})
-            if hosts:
-                host_ip = hosts[0].get('address')
-
             access_mode = "BYPASS"
 
-            if host_ip:
-                login_args = {'user': user_name, 'password': user_pass, 'mac-address': mac, 'ip': host_ip}
-                try:
-                    active.call('login', arguments=login_args)
-                    active_rows = active.call('print', queries={'mac-address': mac})
-                    if active_rows:
-                        access_mode = "ACTIVE"
-                    else:
-                        raise RuntimeError("login command finished but active session not found")
-                except Exception:
-                    binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
-            else:
+            for _ in range(5):
+                hosts = host_res.call('print', queries={'mac-address': mac})
+                if hosts:
+                    host_ip = hosts[0].get('address')
+                if host_ip:
+                    login_args = {'user': user_name, 'password': user_pass, 'mac-address': mac, 'ip': host_ip}
+                    try:
+                        active.call('login', arguments=login_args)
+                        time.sleep(0.25)
+                        active_rows = active.call('print', queries={'mac-address': mac})
+                        if active_rows:
+                            access_mode = "ACTIVE"
+                            break
+                    except Exception:
+                        pass
+                time.sleep(0.35)
+
+            if access_mode != "ACTIVE":
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
 
         now = datetime.now(KZ_TZ)
