@@ -320,10 +320,19 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
 
 
 @app.get("/activate_welcome")
-async def activate_welcome(mac: str, router_id: str = "astana_01"):
-    """Активация 3 минут для просмотра тарифов"""
+async def activate_welcome(request: Request, mac: str, router_id: str = "astana_01"):
+    """Welcome step: Android without grant, iOS/others with short PAY_WINDOW grant"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         return JSONResponse({"error": "Некорректный MAC"}, status_code=400)
+
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    is_android = "android" in user_agent
+
+    # Android captive portal tends to close early if internet is granted on welcome step.
+    # Keep welcome as pure navigation for Android, but preserve current iOS behavior.
+    if is_android:
+        tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
+        return RedirectResponse(url=tariff_url, status_code=302)
 
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
