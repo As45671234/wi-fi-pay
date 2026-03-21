@@ -6,7 +6,7 @@ import sqlite3
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from urllib.parse import urlencode
+from urllib.parse import urlencode, unquote
 
 from fastapi import FastAPI, Request, Form, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -212,6 +212,18 @@ def get_signature(script_name, params, secret_key):
     return hashlib.md5(sig_str.encode('utf-8')).hexdigest()
 
 
+def decode_nested_url_value(value: str) -> str:
+    if value is None:
+        return ""
+    decoded = value
+    for _ in range(3):
+        next_value = unquote(decoded)
+        if next_value == decoded:
+            break
+        decoded = next_value
+    return decoded
+
+
 def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str) -> str:
     if amount >= 2000:
         minutes = 1440
@@ -222,8 +234,11 @@ def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: s
     else:
         minutes = 5  # тест 100₸
     success_url = (
-        f"https://wifi-pay.kz/success?"
-        + urlencode({'mac': mac, 'router_id': router_id, 'minutes': minutes, 'amount': amount})
+        f"https://wifi-pay.kz/success"
+        f"?mac={mac}"
+        f"&router_id={router_id}"
+        f"&minutes={minutes}"
+        f"&amount={amount}"
     )
     params = {
         'pg_merchant_id': MERCHANT_ID, 'pg_amount': str(amount), 'pg_currency': 'KZT',
@@ -457,6 +472,8 @@ async def success(
     minutes: int = 60,
     amount: int = 0,
 ):
+    mac = decode_nested_url_value(mac)
+    router_id = decode_nested_url_value(router_id)
     return templates.TemplateResponse("success.html", {
         "request": request,
         "mac": mac,
