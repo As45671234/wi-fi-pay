@@ -170,6 +170,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
 
         on_event = (
+            f'/ip hotspot active remove [find mac-address="{mac}"]; '
             f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
             f'/ip hotspot user remove [find name="{user_name}"]; '
             f'/system scheduler remove [find name="{task_name}"];'
@@ -204,11 +205,22 @@ def get_signature(script_name, params, secret_key):
 
 
 def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str) -> str:
+    if amount >= 2000:
+        minutes = 1440
+    elif amount >= 900:
+        minutes = 180
+    else:
+        minutes = 60
+    success_url = (
+        f"https://wifi-pay.kz/success?"
+        + urlencode({'mac': mac, 'router_id': router_id, 'minutes': minutes, 'amount': amount})
+    )
     params = {
         'pg_merchant_id': MERCHANT_ID, 'pg_amount': str(amount), 'pg_currency': 'KZT',
         'pg_description': f"Wi-Fi {mac}", 'pg_order_id': payment_order_id,
         'pg_salt': 'salt', 'pg_param1': mac, 'pg_param2': router_id,
-        'pg_result_url': 'https://wifi-pay.kz/payment_result', 'pg_success_url': 'https://wifi-pay.kz/success'
+        'pg_result_url': 'https://wifi-pay.kz/payment_result',
+        'pg_success_url': success_url,
     }
     params['pg_sig'] = get_signature("payment.php", params, SECRET_KEY)
     return f"{PAY_URL}?{urlencode(params)}"
@@ -417,8 +429,20 @@ async def payment_result(request: Request):
         return Response(content="Internal error", status_code=500)
 
 @app.get("/success", response_class=HTMLResponse)
-async def success():
-    return "<html><body style='text-align:center;padding-top:50px;'><h1>Оплата принята!</h1><p>Интернет активирован. Приятного пользования!</p></body></html>"
+async def success(
+    request: Request,
+    mac: str = "00:00:00:00:00:00",
+    router_id: str = "astana_01",
+    minutes: int = 60,
+    amount: int = 0,
+):
+    return templates.TemplateResponse("success.html", {
+        "request": request,
+        "mac": mac,
+        "router_id": router_id,
+        "minutes": minutes,
+        "amount": amount,
+    })
 
 if __name__ == "__main__":
     import uvicorn

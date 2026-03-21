@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Доступ активирован — Wi-Fi Pay</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; color: #1f2937; padding: 20px; box-sizing: border-box; }
+
+        .card { background: #ffffff; border-radius: 2.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.05); padding: 2.5rem 2rem; width: 85%; max-width: 420px; text-align: center; border: 1px solid #f1f5f9; }
+
+        .success-icon { width: 72px; height: 72px; background: #ecfdf5; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; }
+        .success-icon svg { color: #10b981; }
+        .expired-icon { width: 72px; height: 72px; background: #fff7ed; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; display: none; }
+
+        h1 { font-size: 1.4rem; font-weight: 700; margin: 0 0 0.5rem 0; color: #111827; }
+        .subtitle { color: #6b7280; font-size: 0.9rem; margin-bottom: 2rem; }
+
+        .timer-box { background: #f0f7ff; border: 2px solid #bfdbfe; border-radius: 1.5rem; padding: 1.5rem; margin-bottom: 2rem; }
+        .timer-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin-bottom: 0.6rem; font-weight: 600; }
+        .timer-display { font-size: 3rem; font-weight: 800; color: #1e3a8a; letter-spacing: 0.05em; font-variant-numeric: tabular-nums; line-height: 1; }
+        .timer-display.warning { color: #d97706; }
+        .timer-display.expired-text { color: #ef4444; font-size: 1.4rem; display: none; }
+
+        .info-box { background: #f9fafb; border-radius: 1.2rem; padding: 1.2rem; margin-bottom: 1.5rem; text-align: left; border: 1px solid #f1f5f9; }
+        .info-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; padding: 0.3rem 0; }
+        .info-label { color: #6b7280; }
+        .info-value { font-weight: 600; color: #111827; }
+
+        .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28,117,255,0.25); text-decoration: none; display: block; box-sizing: border-box; }
+        .btn:active { transform: scale(0.98); }
+        .btn-expired { display: none; background-color: #ef4444; box-shadow: 0 8px 20px rgba(239,68,68,0.25); }
+        .btn-close { background-color: #10b981; box-shadow: 0 8px 20px rgba(16,185,129,0.2); margin-bottom: 0.75rem; }
+
+        .hint { font-size: 0.78rem; color: #9ca3af; margin-top: 1rem; line-height: 1.5; }
+
+        .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 1.5rem; }
+
+        .footer { margin-top: 2rem; text-align: center; width: 100%; max-width: 420px; }
+        .f-line { height: 1px; background: #e5e7eb; margin-bottom: 1rem; }
+        .f-email { font-size: 0.75rem; color: #9ca3af; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="success-icon" id="successIcon">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+    </div>
+    <div class="expired-icon" id="expiredIcon">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+    </div>
+
+    <h1 id="pageTitle">Оплата прошла!</h1>
+    <p class="subtitle" id="pageSubtitle">Интернет активирован. Можете закрыть эту вкладку.</p>
+
+    <div class="timer-box">
+        <div class="timer-label" id="timerLabel">Время доступа истекает через</div>
+        <div class="timer-display" id="timerDisplay">--:--:--</div>
+        <div class="timer-display expired-text" id="expiredDisplay">Сессия завершена</div>
+    </div>
+
+    <div class="info-box">
+        <div class="info-row">
+            <span class="info-label">Тариф</span>
+            <span class="info-value" id="tariffName">—</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Сумма</span>
+            <span class="info-value" id="tariffAmount">—</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Устройство</span>
+            <span class="info-value" id="deviceId">—</span>
+        </div>
+    </div>
+
+    <a href="#" class="btn btn-close" id="closeBtn" onclick="window.close(); return false;">
+        Закрыть и пользоваться интернетом
+    </a>
+    <a class="btn btn-expired" id="expiredBtn">
+        Выбрать новый тариф
+    </a>
+
+    <p class="hint" id="hintText">Закройте эту вкладку и пользуйтесь интернетом. Когда время истечёт — откроется страница выбора тарифа.</p>
+
+    <div class="mac-id">ID: {{ mac }}</div>
+</div>
+
+<div class="footer">
+    <div class="f-line"></div>
+    <div class="f-email">sanatkalkiyev@gmail.com | © 2026 Wi-Fi Pay</div>
+</div>
+
+<script>
+'use strict';
+
+const MAC = "{{ mac }}";
+const ROUTER_ID = "{{ router_id }}";
+const MINUTES = parseInt("{{ minutes }}", 10) || 60;
+const AMOUNT = parseInt("{{ amount }}", 10) || 0;
+
+// Названия тарифов
+function tariffName(minutes) {
+    if (minutes >= 1440) return "Безлимит на день";
+    if (minutes >= 180)  return "3 часа доступа";
+    return "1 час доступа";
+}
+
+function tariffAmount(amount) {
+    return amount > 0 ? `${amount} ₸` : "—";
+}
+
+function formatDevice(mac) {
+    return mac ? mac.slice(0, 8) + "***" : "—";
+}
+
+document.getElementById('tariffName').textContent   = tariffName(MINUTES);
+document.getElementById('tariffAmount').textContent = tariffAmount(AMOUNT);
+document.getElementById('deviceId').textContent     = formatDevice(MAC);
+
+// Expiry timestamp — persist so page refresh doesn't reset it
+const storageKey = `wf_expiry_${MAC}`;
+let expiryTs = parseInt(localStorage.getItem(storageKey) || '0', 10);
+
+// Only set a fresh expiry if it looks wrong (old or missing)
+if (!expiryTs || expiryTs < Date.now()) {
+    expiryTs = Date.now() + MINUTES * 60 * 1000;
+    localStorage.setItem(storageKey, String(expiryTs));
+}
+
+const tariffUrl = `/tariffs?mac=${encodeURIComponent(MAC)}&router_id=${encodeURIComponent(ROUTER_ID)}`;
+document.getElementById('expiredBtn').href = tariffUrl;
+
+function formatTime(ms) {
+    if (ms <= 0) return "00:00:00";
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+}
+
+function tick() {
+    const remaining = expiryTs - Date.now();
+    const display = document.getElementById('timerDisplay');
+    const expiredDisplay = document.getElementById('expiredDisplay');
+    const expiredBtn = document.getElementById('expiredBtn');
+    const closeBtn = document.getElementById('closeBtn');
+    const successIcon = document.getElementById('successIcon');
+    const expiredIcon = document.getElementById('expiredIcon');
+    const hint = document.getElementById('hintText');
+    const title = document.getElementById('pageTitle');
+    const subtitle = document.getElementById('pageSubtitle');
+    const timerLabel = document.getElementById('timerLabel');
+
+    if (remaining <= 0) {
+        // Session expired
+        display.style.display = 'none';
+        expiredDisplay.style.display = 'block';
+        expiredBtn.style.display = 'block';
+        closeBtn.style.display = 'none';
+        successIcon.style.display = 'none';
+        expiredIcon.style.display = 'flex';
+        title.textContent = 'Время истекло';
+        subtitle.textContent = 'Выберите новый тариф для продолжения';
+        timerLabel.textContent = 'Сессия завершена';
+        hint.textContent = 'Нажмите кнопку ниже или откройте Wi-Fi — страница выбора тарифов откроется автоматически.';
+        localStorage.removeItem(storageKey);
+
+        // Auto-redirect after 5 seconds
+        setTimeout(() => { window.location.href = tariffUrl; }, 5000);
+        return;
+    }
+
+    // Warning color under 2 minutes
+    if (remaining < 2 * 60 * 1000) {
+        display.classList.add('warning');
+    }
+
+    display.textContent = formatTime(remaining);
+    setTimeout(tick, 1000);
+}
+
+tick();
+</script>
+</body>
+</html>
