@@ -132,8 +132,9 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
         for u in user_res.call('print', queries={'name': user_name}):
             user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
 
-        if mode == 'PAY_WINDOW':
-            # Payment window should open as fast as possible; bypass is enough here.
+        if mode in ('PAY_WINDOW', 'TRIAL'):
+            # Bypass-only: fast activation, no active login needed.
+            # TRIAL uses bypass+scheduler so MikroTik's native enforcement isn't required.
             binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
         else:
             user_res.call('add', arguments={
@@ -166,10 +167,19 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             if access_mode != "ACTIVE":
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
 
-        now = datetime.now(KZ_TZ)
-        expiry = now + timedelta(minutes=minutes)
-        mt_date = expiry.strftime("%b/%d/%Y").lower()
-        mt_time = expiry.strftime("%H:%M:%S")
+        # Use MikroTik's own clock to avoid VPS/router timezone mismatch.
+        # If VPS is UTC+5 but router is UTC, using VPS time would schedule 5 hours late.
+        try:
+            clock_info = api.get_resource('/system/clock').call('print')[0]
+            mt_now = datetime.strptime(
+                f"{clock_info.get('date', '')} {clock_info.get('time', '')}",
+                "%b/%d/%Y %H:%M:%S"
+            )
+        except Exception:
+            mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
+        mt_expiry = mt_now + timedelta(minutes=minutes)
+        mt_date = mt_expiry.strftime("%b/%d/%Y").lower()
+        mt_time = mt_expiry.strftime("%H:%M:%S")
         task_name = f"del_{mac.replace(':', '')}"
 
         for t in sched.call('print', queries={'name': task_name}):
