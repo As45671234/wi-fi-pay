@@ -32,15 +32,34 @@ echo ""
 # Проверка активной сессии через API
 echo "🔐 АКТИВНЫЕ СЕССИИ В MIKROTIK:"
 echo "─────────────────────────────────────────────"
-python3 << 'PYTHON_SCRIPT'
+python3 - "$MAC" << 'PYTHON_SCRIPT'
 import routeros_api
 import sys
 import os
+from datetime import datetime, timezone
 
 MAC = sys.argv[1] if len(sys.argv) > 1 else "22:1D:C8:99:FE:B0"
 ROUTER_IP = os.getenv('ROUTER_IP', '10.0.0.2')
 ROUTER_USER = os.getenv('ROUTER_USER', 'admin')
 ROUTER_PASS = os.getenv('ROUTER_PASS', 'kaspiwifiadmin2026')
+
+
+def parse_scheduler_dt(date_str, time_str):
+    try:
+        return datetime.strptime(f"{date_str} {time_str}", "%b/%d/%Y %H:%M:%S")
+    except Exception:
+        return None
+
+
+def format_remaining(target_dt):
+    if not target_dt:
+        return "N/A"
+    remaining = int((target_dt - datetime.now()).total_seconds())
+    if remaining <= 0:
+        return "expired"
+    hours, rem = divmod(remaining, 3600)
+    minutes, seconds = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 try:
     connection = routeros_api.RouterOsApiPool(
@@ -104,9 +123,11 @@ try:
     
     if tasks:
         for t in tasks:
+            target_dt = parse_scheduler_dt(t.get('start-date', ''), t.get('start-time', ''))
             print(f"✓ Задача найдена!")
             print(f"  Name: {t.get('name', 'N/A')}")
             print(f"  Start: {t.get('start-date', 'N/A')} {t.get('start-time', 'N/A')}")
+            print(f"  Remaining: {format_remaining(target_dt)}")
             print(f"  Comment: {t.get('comment', 'N/A')}")
     else:
         print("✗ Задач не найдено")
@@ -116,7 +137,7 @@ try:
 except Exception as e:
     print(f"❌ Ошибка: {e}")
 
-PYTHON_SCRIPT $MAC
+PYTHON_SCRIPT
 
 echo ""
 echo "═══════════════════════════════════════════════"
