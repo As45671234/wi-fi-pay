@@ -103,6 +103,8 @@
     const urlParams = new URLSearchParams(window.location.search);
     const macAddress = urlParams.get('mac') || "{{ mac }}";
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
+    const trialTs = "{{ trial_ts }}";
+    const trialSig = "{{ trial_sig }}";
     const userAgent = navigator.userAgent || '';
     const isAndroid = /android/i.test(userAgent);
     const isIOS = /iPad|iPhone|iPod/i.test(userAgent);
@@ -181,6 +183,8 @@
         const fd = new FormData();
         fd.append('mac', macAddress);
         fd.append('router_id', routerId);
+        fd.append('trial_ts', trialTs);
+        fd.append('trial_sig', trialSig);
 
         try {
             const response = await fetchWithTimeout('/get_free_trial', { method: 'POST', body: fd }, 9000);

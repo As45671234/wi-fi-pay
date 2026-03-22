@@ -1,5 +1,6 @@
 import os
 import hashlib
+import hmac
 import time
 import logging
 import sqlite3
@@ -37,6 +38,10 @@ MERCHANT_ID = "581983"
 SECRET_KEY = "PMwioQEEEOFbDBAu"
 PAY_URL = "https://api.freedompay.kz/payment.php"
 KZ_TZ = ZoneInfo("Asia/Almaty")
+TRIAL_TOKEN_TTL_SECONDS = 5 * 60
+TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
+TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
+TRIAL_RATE_BUCKET = {}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -108,6 +113,47 @@ def get_or_create_device_id(request: Request) -> tuple[str, bool]:
     if re.fullmatch(r"[A-Za-z0-9]{24,64}", raw or ""):
         return raw, False
     return secrets.token_hex(16), True
+
+
+def get_client_ip(request: Request) -> str:
+    xff = (request.headers.get("x-forwarded-for") or "").strip()
+    if xff:
+        return xff.split(",")[0].strip()
+    client = request.client
+    return (client.host if client else "unknown") or "unknown"
+
+
+def is_trial_rate_limited(request: Request) -> bool:
+    ip = get_client_ip(request)
+    now = int(time.time())
+    recent = [
+        ts for ts in TRIAL_RATE_BUCKET.get(ip, [])
+        if now - ts < TRIAL_RATE_LIMIT_WINDOW_SECONDS
+    ]
+    if len(recent) >= TRIAL_RATE_LIMIT_MAX_REQUESTS:
+        TRIAL_RATE_BUCKET[ip] = recent
+        return True
+    recent.append(now)
+    TRIAL_RATE_BUCKET[ip] = recent
+    return False
+
+
+def make_trial_signature(mac: str, router_id: str, trial_ts: str) -> str:
+    payload = f"{mac}|{router_id}|{trial_ts}"
+    return hmac.new(SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig: str) -> bool:
+    if not trial_ts or not re.fullmatch(r"\d{10}", trial_ts):
+        return False
+    if not trial_sig or not re.fullmatch(r"[0-9a-fA-F]{64}", trial_sig):
+        return False
+    now = int(time.time())
+    ts = int(trial_ts)
+    if abs(now - ts) > TRIAL_TOKEN_TTL_SECONDS:
+        return False
+    expected = make_trial_signature(mac, router_id, trial_ts)
+    return hmac.compare_digest(expected, trial_sig.lower())
 
 
 init_db()
@@ -282,7 +328,18 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
 
 @app.get("/tariffs", response_class=HTMLResponse)
 async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
-    response = templates.TemplateResponse("index.html", {"request": request, "mac": mac, "router_id": router_id})
+    trial_ts = str(int(time.time()))
+    trial_sig = make_trial_signature(mac, router_id, trial_ts)
+    response = templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "mac": mac,
+            "router_id": router_id,
+            "trial_ts": trial_ts,
+            "trial_sig": trial_sig,
+        },
+    )
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -368,10 +425,22 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
 
 @app.post("/get_free_trial")
-async def get_free_trial(request: Request, mac: str = Form(...), router_id: str = Form(...)):
+async def get_free_trial(
+    request: Request,
+    mac: str = Form(...),
+    router_id: str = Form(...),
+    trial_ts: str = Form(""),
+    trial_sig: str = Form(""),
+):
     """Выдача 15 минут бесплатного доступа (1 раз в сутки)"""
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
+
+    if is_trial_rate_limited(request):
+        return JSONResponse({"error": "Слишком много попыток. Подождите 10 минут и повторите."}, status_code=429)
+
+    if not is_valid_trial_signature(mac, router_id, trial_ts, trial_sig):
+        return JSONResponse({"error": "Сессия истекла. Обновите страницу и попробуйте снова."}, status_code=400)
 
     device_id, is_new_device_id = get_or_create_device_id(request)
 
