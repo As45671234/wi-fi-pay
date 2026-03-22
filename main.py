@@ -4,6 +4,7 @@ import time
 import logging
 import sqlite3
 import re
+import secrets
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode, unquote
@@ -52,6 +53,7 @@ def init_db():
             amount INTEGER,
             status TEXT,
             router_id TEXT,
+            device_id TEXT,
             payment_order_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -59,6 +61,8 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(orders)")
     columns = {row[1] for row in cursor.fetchall()}
+    if 'device_id' not in columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN device_id TEXT")
     if 'payment_order_id' not in columns:
         conn.execute("ALTER TABLE orders ADD COLUMN payment_order_id TEXT")
     conn.commit()
@@ -74,19 +78,36 @@ def get_db_connection():
         conn.close()
 
 
-def check_trial_used_today(mac: str) -> bool:
-    """Проверяет, использовал ли MAC пробный период сегодня"""
+def check_trial_used_today(mac: str, device_id: str) -> bool:
+    """Проверяет, использовался ли пробный период сегодня по MAC или device_id."""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
         cursor = conn.cursor()
         today_start = datetime.now(KZ_TZ).strftime("%Y-%m-%d 00:00:00")
         cursor.execute(
-            "SELECT id FROM orders WHERE mac_address = ? AND status = 'TRIAL' AND created_at >= ?",
-            (mac, today_start),
+            """
+            SELECT id
+            FROM orders
+            WHERE status = 'TRIAL'
+              AND created_at >= ?
+              AND (
+                mac_address = ?
+                OR (device_id IS NOT NULL AND device_id != '' AND device_id = ?)
+              )
+            LIMIT 1
+            """,
+            (today_start, mac, device_id),
         )
         return cursor.fetchone() is not None
     finally:
         conn.close()
+
+
+def get_or_create_device_id(request: Request) -> tuple[str, bool]:
+    raw = (request.cookies.get("wf_device_id") or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9]{24,64}", raw or ""):
+        return raw, False
+    return secrets.token_hex(16), True
 
 
 init_db()
@@ -347,13 +368,26 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
 
 @app.post("/get_free_trial")
-async def get_free_trial(mac: str = Form(...), router_id: str = Form(...)):
+async def get_free_trial(request: Request, mac: str = Form(...), router_id: str = Form(...)):
     """Выдача 15 минут бесплатного доступа (1 раз в сутки)"""
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
-    
-    if check_trial_used_today(mac):
-        return JSONResponse({"error": "Бесплатный доступ уже использован сегодня. Ждем вас завтра!"}, status_code=403)
+
+    device_id, is_new_device_id = get_or_create_device_id(request)
+
+    if check_trial_used_today(mac, device_id):
+        blocked = JSONResponse({"error": "Бесплатный доступ уже использован сегодня. Ждем вас завтра!"}, status_code=403)
+        if is_new_device_id:
+            blocked.set_cookie(
+                key="wf_device_id",
+                value=device_id,
+                max_age=60 * 60 * 24 * 365,
+                httponly=True,
+                secure=True,
+                samesite="lax",
+                path="/",
+            )
+        return blocked
 
     if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
@@ -361,14 +395,25 @@ async def get_free_trial(mac: str = Form(...), router_id: str = Form(...)):
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
         conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, 0, 'TRIAL', ?)",
-            (mac, router_id),
+            "INSERT INTO orders (mac_address, amount, status, router_id, device_id) VALUES (?, 0, 'TRIAL', ?, ?)",
+            (mac, router_id, device_id),
         )
         conn.commit()
     finally:
         conn.close()
-    
-    return {"message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь."}
+
+    response = JSONResponse({"message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь."})
+    if is_new_device_id:
+        response.set_cookie(
+            key="wf_device_id",
+            value=device_id,
+            max_age=60 * 60 * 24 * 365,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+    return response
 
 
 @app.post("/payment_result")
