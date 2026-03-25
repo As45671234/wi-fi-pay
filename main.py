@@ -89,25 +89,24 @@ def get_db_connection():
         conn.close()
 
 
-def check_trial_used_today(mac: str, device_id: str) -> bool:
-    """Проверяет, использовался ли пробный период сегодня по MAC или device_id."""
+def check_trial_used_last_24h(mac: str, device_id: str) -> bool:
+        """Проверяет, использовался ли пробный период за последние 24 часа по MAC или device_id."""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
         cursor = conn.cursor()
-        today_start = datetime.now(KZ_TZ).strftime("%Y-%m-%d 00:00:00")
         cursor.execute(
             """
             SELECT id
             FROM orders
             WHERE status = 'TRIAL'
-              AND created_at >= ?
+                            AND created_at >= datetime('now', '-24 hours')
               AND (
                 mac_address = ?
                 OR (device_id IS NOT NULL AND device_id != '' AND device_id = ?)
               )
             LIMIT 1
             """,
-            (today_start, mac, device_id),
+                        (mac, device_id),
         )
         return cursor.fetchone() is not None
     finally:
@@ -450,8 +449,8 @@ async def get_free_trial(
 
     device_id, is_new_device_id = get_or_create_device_id(request)
 
-    if check_trial_used_today(mac, device_id):
-        blocked = JSONResponse({"error": "Бесплатный доступ уже использован сегодня. Ждем вас завтра!"}, status_code=403)
+    if check_trial_used_last_24h(mac, device_id):
+        blocked = JSONResponse({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403)
         if is_new_device_id:
             blocked.set_cookie(
                 key="wf_device_id",
