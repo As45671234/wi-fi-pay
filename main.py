@@ -71,14 +71,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
-# --- ЗАГРУЗКА КОНФИГА РОУТЕРОВ ИЗ ФАЙЛА (если есть) ---
-ROUTERS_CONFIG_PATH = os.path.join(BASE_DIR, "routers_config.json")
-if os.path.exists(ROUTERS_CONFIG_PATH):
-    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
-        routers_list = json.load(f)
-    ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
-
-# --- БАЗА ДАННЫХ ---
+# --- БАЗА ДАННЫХ И КОНФИГ ---
 
 def init_db():
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -104,6 +97,13 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ЧИТАЕМ JSON ФАЙЛ (ИСпРАВЛЕНО!)
+ROUTERS_CONFIG_PATH = os.path.join(BASE_DIR, "routers_config.json")
+if os.path.exists(ROUTERS_CONFIG_PATH):
+    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
+        routers_list = json.load(f)
+    ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
+
 def get_db_connection():
     """Context manager для безопасной работы с БД"""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -113,7 +113,7 @@ def get_db_connection():
         conn.close()
 
 def get_or_create_device_id(request: Request):
-    """Получает или создает уникальный ID устройства из куки"""
+    """Генерирует ID устройства для куки"""
     device_id = request.cookies.get("wf_device_id")
     if device_id:
         return device_id, False
@@ -143,6 +143,7 @@ def get_client_ip(request: Request) -> str:
     client = request.client
     return (client.host if client else "unknown") or "unknown"
 
+
 def is_trial_rate_limited(request: Request) -> bool:
     ip = get_client_ip(request)
     now = int(time.time())
@@ -157,9 +158,11 @@ def is_trial_rate_limited(request: Request) -> bool:
     TRIAL_RATE_BUCKET[ip] = recent
     return False
 
+
 def make_trial_signature(mac: str, router_id: str, trial_ts: str) -> str:
     payload = f"{mac}|{router_id}|{trial_ts}"
     return hmac.new(SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
 
 def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig: str) -> bool:
     if not trial_ts or not re.fullmatch(r"\d{10}", trial_ts):
@@ -173,7 +176,9 @@ def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig:
     expected = make_trial_signature(mac, router_id, trial_ts)
     return hmac.compare_digest(expected, trial_sig.lower())
 
+
 init_db()
+
 
 # --- ЯДРО: MIKROTIK API (СТАТУС A H) ---
 
@@ -209,7 +214,6 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
             user_name = f"T-{mac.replace(':', '')}"
             user_pass = f"p{int(time.time()) % 1000000}"
 
-            # Do not downgrade an already granted TRIAL/PAID session when user opens payment page.
             if mode == 'PAY_WINDOW':
                 existing_bindings = binding.call('print', queries={'mac-address': mac})
                 for b in existing_bindings:
@@ -231,8 +235,6 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
 
             if mode in ('PAY_WINDOW', 'TRIAL'):
-                # Bypass-only: fast activation, no active login needed.
-                # TRIAL uses bypass+scheduler so MikroTik's native enforcement isn't required.
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
             else:
                 user_res.call('add', arguments={
@@ -265,7 +267,6 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 if access_mode != "ACTIVE":
                     binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
 
-            # Use MikroTik's own clock to avoid VPS/router timezone mismatch.
             try:
                 clock_info = api.get_resource('/system/clock').call('print')[0]
                 mt_now = datetime.strptime(
@@ -284,12 +285,12 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
 
             on_event = (
-                f'/ip hotspot active remove [find mac-address="{mac}"]; '
-                f'/ip hotspot cookie remove [find user="{user_name}"]; '
+                f'/ip hotspot active remove[find mac-address="{mac}"]; '
+                f'/ip hotspot cookie remove[find user="{user_name}"]; '
                 f'/ip hotspot host remove [find mac-address="{mac}"]; '
-                f'/ip hotspot ip-binding remove[find mac-address="{mac}"]; '
-                f'/ip hotspot user remove[find name="{user_name}"]; '
-                f'/system scheduler remove [find name="{task_name}"];'
+                f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
+                f'/ip hotspot user remove [find name="{user_name}"]; '
+                f'/system scheduler remove[find name="{task_name}"];'
             )
             sched.call('add', arguments={
                 'name': task_name,
@@ -300,7 +301,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 'comment': f"AUTOCLEAR_{mode}_{mac}",
             })
 
-            if mode in['PAID', 'PAY_WINDOW']:
+            if mode in ['PAID', 'PAY_WINDOW']:
                 logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
             return True
         except Exception as e:
@@ -320,7 +321,6 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                     connection.disconnect()
                 except Exception:
                     pass
-
 
 # --- МАРШРУТЫ ---
 
@@ -342,7 +342,7 @@ def decode_nested_url_value(value: str) -> str:
     return decoded
 
 def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str) -> str:
-    # Currently only one paid tariff: 200₸ = безлимит на день (1440 min)
+    # 200₸ = безлимит на день (1440 min), etc.
     minutes = 1440
     success_url = (
         f"https://wifi-pay.kz/success"
@@ -391,24 +391,19 @@ async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
 async def payment_methods_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("payment_methods.html", {"request": request, "mac": mac, "router_id": router_id})
 
-
 @app.get("/offer", response_class=HTMLResponse)
 @app.get("/offer.html", response_class=HTMLResponse)
 async def offer_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("offer.html", {"request": request, "mac": mac, "router_id": router_id})
-
 
 @app.get("/privacy", response_class=HTMLResponse)
 @app.get("/privacy.html", response_class=HTMLResponse)
 async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("privacy.html", {"request": request, "mac": mac, "router_id": router_id})
 
-
 @app.get("/start_payment")
 async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01"):
-    """Активирует окно оплаты и редиректит на FreedomPay"""
-    # Валидация
-    if amount not in[200]:
+    if amount not in[200, 490, 990, 2490]:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
@@ -436,10 +431,8 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     payment_url = build_payment_url(amount, mac, router_id, payment_order_id)
     return RedirectResponse(url=payment_url, status_code=302)
 
-
 @app.get("/activate_welcome")
 async def activate_welcome(request: Request, mac: str, router_id: str = "astana_01"):
-    """Welcome step: Android without grant, iOS/others with short PAY_WINDOW grant"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         logger.warning(f"[activate_welcome] Некорректный MAC: {mac}")
         return utf8_json_response({"error": "Некорректный MAC"}, status_code=400)
@@ -452,7 +445,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_android = "android" in user_agent
-    is_ios = any(device in user_agent for device in["iphone", "ipad", "ipod"])
+    is_ios = any(device in user_agent for device in ["iphone", "ipad", "ipod"])
 
     if is_android:
         logger.info(f"[activate_welcome] Android detected, mac={mac}, только редирект на /tariffs, доступ не выдается")
@@ -483,7 +476,6 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
     return RedirectResponse(url=tariff_url, status_code=302)
 
-
 @app.post("/get_free_trial")
 async def get_free_trial(
     request: Request,
@@ -492,7 +484,6 @@ async def get_free_trial(
     trial_ts: str = Form(""),
     trial_sig: str = Form(""),
 ):
-    """Выдача 15 минут бесплатного доступа (1 раз в сутки)"""
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
 
@@ -513,15 +504,7 @@ async def get_free_trial(
     if check_trial_used_last_24h(mac, device_id):
         blocked = utf8_json_response({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403)
         if is_new_device_id:
-            blocked.set_cookie(
-                key="wf_device_id",
-                value=device_id,
-                max_age=60 * 60 * 24 * 365,
-                httponly=True,
-                secure=True,
-                samesite="lax",
-                path="/",
-            )
+            blocked.set_cookie(key="wf_device_id", value=device_id, max_age=60 * 60 * 24 * 365, httponly=True, secure=True, samesite="lax", path="/")
         return blocked
 
     if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
@@ -539,31 +522,19 @@ async def get_free_trial(
 
     response = JSONResponse({"message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь."})
     if is_new_device_id:
-        response.set_cookie(
-            key="wf_device_id",
-            value=device_id,
-            max_age=60 * 60 * 24 * 365,
-            httponly=True,
-            secure=True,
-            samesite="lax",
-            path="/",
-        )
+        response.set_cookie(key="wf_device_id", value=device_id, max_age=60 * 60 * 24 * 365, httponly=True, secure=True, samesite="lax", path="/")
     return response
-
 
 @app.post("/payment_result")
 async def payment_result(request: Request):
-    """Принимает callback от FreedomPay и активирует оплаченный доступ"""
     try:
         form_data = await request.form()
         params = dict(form_data)
 
-        # Проверка подписи
         if params.get('pg_sig') != get_signature("payment_result", params, SECRET_KEY):
             logger.warning("Invalid signature in payment callback")
             return Response(content="Invalid signature", status_code=400)
         
-        # Проверка успешной оплаты
         if params.get('pg_result') != '1':
             logger.info(f"Payment failed: {params.get('pg_result')}")
             return Response(content="Payment not successful", status_code=400)
@@ -602,16 +573,12 @@ async def payment_result(request: Request):
 
         router_id = router_id or 'astana_01'
 
-        # Определение времени доступа
-        # Currently only one paid tariff: 200₸ = безлимит на день (1440 min)
         minutes = 1440
 
-        # Активация доступа
         if not mac or not set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID"):
             logger.error(f"Failed to activate paid access for {mac}")
             return Response(content="Activation failed", status_code=500)
 
-        # Запись в БД
         conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
         try:
             updated = 0
