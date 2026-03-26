@@ -180,136 +180,129 @@ init_db()
 
 
 def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, seconds: int | None = None):
-    config = ROUTERS_CONFIG.get(router_id)
-    if not config:
-        logger.error(f"❌ Неизвестный router_id: {router_id}")
-        return False
-
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
-        logger.error(f"❌ Некорректный MAC: {mac}")
-        return False
-
-    connection = None
-    try:
-        connection = routeros_api.RouterOsApiPool(
-            config['ip'],
-            username=config['user'],
-            password=config['pass'],
-            port=config.get('port', 8728),
-            plaintext_login=True,
-        )
-        api = connection.get_api()
-
-        binding = api.get_resource('/ip/hotspot/ip-binding')
-        active = api.get_resource('/ip/hotspot/active')
-        user_res = api.get_resource('/ip/hotspot/user')
-        host_res = api.get_resource('/ip/hotspot/host')
-        sched = api.get_resource('/system/scheduler')
-
-        user_name = f"T-{mac.replace(':', '')}"
-        user_pass = f"p{int(time.time()) % 1000000}"
-
-        # Do not downgrade an already granted TRIAL/PAID session when user opens payment page.
-        if mode == 'PAY_WINDOW':
-            existing_bindings = binding.call('print', queries={'mac-address': mac})
-            for b in existing_bindings:
-                comment = (b.get('comment') or '')
-                if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
-                    return True
-
-            existing_users = user_res.call('print', queries={'name': user_name})
-            for u in existing_users:
-                comment = (u.get('comment') or '')
-                if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
-                    return True
-
-        for b in binding.call('print', queries={'mac-address': mac}):
-            binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
-        for a in active.call('print', queries={'mac-address': mac}):
-            active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
-        for u in user_res.call('print', queries={'name': user_name}):
-            user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
-
-        if mode in ('PAY_WINDOW', 'TRIAL'):
-            # Bypass-only: fast activation, no active login needed.
-            # TRIAL uses bypass+scheduler so MikroTik's native enforcement isn't required.
-            binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
-        else:
-            user_res.call('add', arguments={
-                'name': user_name,
-                'password': user_pass,
-                'limit-uptime': f"{minutes}m",
-                'comment': f"{mode}_{mac}",
-            })
-
-            host_ip = None
-            access_mode = "BYPASS"
-
-            for _ in range(5):
-                hosts = host_res.call('print', queries={'mac-address': mac})
-                if hosts:
-                    host_ip = hosts[0].get('address')
-                if host_ip:
-                    login_args = {'user': user_name, 'password': user_pass, 'mac-address': mac, 'ip': host_ip}
-                    try:
-                        active.call('login', arguments=login_args)
-                        time.sleep(0.25)
-                        active_rows = active.call('print', queries={'mac-address': mac})
-                        if active_rows:
-                            access_mode = "ACTIVE"
-                            break
-                    except Exception:
-                        pass
-                time.sleep(0.35)
-
-            if access_mode != "ACTIVE":
-                binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
-
-        # Use MikroTik's own clock to avoid VPS/router timezone mismatch.
-        # If VPS is UTC+5 but router is UTC, using VPS time would schedule 5 hours late.
+    import asyncio
+    import concurrent.futures
+    def mikrotik_job():
+        config = ROUTERS_CONFIG.get(router_id)
+        if not config:
+            logger.error(f"❌ Неизвестный router_id: {router_id}")
+            return False
+        if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+            logger.error(f"❌ Некорректный MAC: {mac}")
+            return False
+        connection = None
         try:
-            clock_info = api.get_resource('/system/clock').call('print')[0]
-            mt_now = datetime.strptime(
-                f"{clock_info.get('date', '')} {clock_info.get('time', '')}",
-                "%b/%d/%Y %H:%M:%S"
+            connection = routeros_api.RouterOsApiPool(
+                config['ip'],
+                username=config['user'],
+                password=config['pass'],
+                port=config.get('port', 8728),
+                plaintext_login=True,
             )
-        except Exception:
-            mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
-        duration_seconds = max(1, int(seconds if seconds is not None else round(minutes * 60)))
-        mt_expiry = mt_now + timedelta(seconds=duration_seconds)
-        mt_date = mt_expiry.strftime("%b/%d/%Y").lower()
-        mt_time = mt_expiry.strftime("%H:%M:%S")
-        task_name = f"del_{mac.replace(':', '')}"
-
-        for t in sched.call('print', queries={'name': task_name}):
-            sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
-
-        on_event = (
-            f'/ip hotspot active remove [find mac-address="{mac}"]; '
-            f'/ip hotspot cookie remove [find user="{user_name}"]; '
-            f'/ip hotspot host remove [find mac-address="{mac}"]; '
-            f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
-            f'/ip hotspot user remove [find name="{user_name}"]; '
-            f'/system scheduler remove [find name="{task_name}"];'
-        )
-        sched.call('add', arguments={
-            'name': task_name,
-            'start-date': mt_date,
-            'start-time': mt_time,
-            'interval': "00:00:00",
-            'on-event': on_event,
-            'comment': f"AUTOCLEAR_{mode}_{mac}",
-        })
-
-        if mode in ['PAID', 'PAY_WINDOW']:
-            logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
-        return True
-    except Exception as e:
-        logger.error(f"MikroTik API error for {router_id}: {str(e)[:100]}")
-        return False
-    finally:
-        if connection:
-            connection.disconnect()
+            api = connection.get_api()
+            binding = api.get_resource('/ip/hotspot/ip-binding')
+            active = api.get_resource('/ip/hotspot/active')
+            user_res = api.get_resource('/ip/hotspot/user')
+            host_res = api.get_resource('/ip/hotspot/host')
+            sched = api.get_resource('/system/scheduler')
+            user_name = f"T-{mac.replace(':', '')}"
+            user_pass = f"p{int(time.time()) % 1000000}"
+            if mode == 'PAY_WINDOW':
+                existing_bindings = binding.call('print', queries={'mac-address': mac})
+                for b in existing_bindings:
+                    comment = (b.get('comment') or '')
+                    if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                        return True
+                existing_users = user_res.call('print', queries={'name': user_name})
+                for u in existing_users:
+                    comment = (u.get('comment') or '')
+                    if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                        return True
+            for b in binding.call('print', queries={'mac-address': mac}):
+                binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
+            for a in active.call('print', queries={'mac-address': mac}):
+                active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
+            for u in user_res.call('print', queries={'name': user_name}):
+                user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
+            if mode in ('PAY_WINDOW', 'TRIAL'):
+                binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+            else:
+                user_res.call('add', arguments={
+                    'name': user_name,
+                    'password': user_pass,
+                    'limit-uptime': f"{minutes}m",
+                    'comment': f"{mode}_{mac}",
+                })
+                host_ip = None
+                access_mode = "BYPASS"
+                for _ in range(5):
+                    hosts = host_res.call('print', queries={'mac-address': mac})
+                    if hosts:
+                        host_ip = hosts[0].get('address')
+                    if host_ip:
+                        login_args = {'user': user_name, 'password': user_pass, 'mac-address': mac, 'ip': host_ip}
+                        try:
+                            active.call('login', arguments=login_args)
+                            time.sleep(0.25)
+                            active_rows = active.call('print', queries={'mac-address': mac})
+                            if active_rows:
+                                access_mode = "ACTIVE"
+                                break
+                        except Exception:
+                            pass
+                    time.sleep(0.35)
+                if access_mode != "ACTIVE":
+                    binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+            try:
+                clock_info = api.get_resource('/system/clock').call('print')[0]
+                mt_now = datetime.strptime(
+                    f"{clock_info.get('date', '')} {clock_info.get('time', '')}",
+                    "%b/%d/%Y %H:%M:%S"
+                )
+            except Exception:
+                mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
+            duration_seconds = max(1, int(seconds if seconds is not None else round(minutes * 60)))
+            mt_expiry = mt_now + timedelta(seconds=duration_seconds)
+            mt_date = mt_expiry.strftime("%b/%d/%Y").lower()
+            mt_time = mt_expiry.strftime("%H:%M:%S")
+            task_name = f"del_{mac.replace(':', '')}"
+            for t in sched.call('print', queries={'name': task_name}):
+                sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
+            on_event = (
+                f'/ip hotspot active remove [find mac-address="{mac}"]; '
+                f'/ip hotspot cookie remove [find user="{user_name}"]; '
+                f'/ip hotspot host remove [find mac-address="{mac}"]; '
+                f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
+                f'/ip hotspot user remove [find name="{user_name}"]; '
+                f'/system scheduler remove [find name="{task_name}"];'
+            )
+            sched.call('add', arguments={
+                'name': task_name,
+                'start-date': mt_date,
+                'start-time': mt_time,
+                'interval': "00:00:00",
+                'on-event': on_event,
+                'comment': f"AUTOCLEAR_{mode}_{mac}",
+            })
+            if mode in ['PAID', 'PAY_WINDOW']:
+                logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
+            return True
+        except Exception as e:
+            logger.error(f"MikroTik API error for {router_id}: {str(e)[:100]}")
+            return False
+        finally:
+            if connection:
+                connection.disconnect()
+    # Асинхронный запуск с таймаутом
+    async def run_with_timeout():
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            try:
+                return await asyncio.wait_for(loop.run_in_executor(pool, mikrotik_job), timeout=10)
+            except asyncio.TimeoutError:
+                logger.error(f"MikroTik API timeout for {router_id}")
+                return False
+    return asyncio.run(run_with_timeout())
 
 
 # --- МАРШРУТЫ ---
