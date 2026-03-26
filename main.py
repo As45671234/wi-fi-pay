@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import routeros_api
 
+
 # --- НАСТРОЙКИ ---
 logging.basicConfig(
     level=logging.WARNING,
@@ -24,6 +25,10 @@ logging.basicConfig(
 logger = logging.getLogger("WiFiGateway")
 
 app = FastAPI(title="Wi-Fi Gateway Final")
+
+# Гарантируем, что все ответы JSON идут с utf-8
+def utf8_json_response(content, status_code=200):
+    return JSONResponse(content, status_code=status_code, headers={"Content-Type": "application/json; charset=utf-8"})
 
 ROUTERS_CONFIG = {
     "astana_01": {
@@ -92,6 +97,7 @@ def init_db():
     conn.close()
 
 
+    import json
 def get_db_connection():
     """Context manager для безопасной работы с БД"""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -108,26 +114,10 @@ def check_trial_used_last_24h(mac: str, device_id: str) -> bool:
                 cursor = conn.cursor()
                 cursor.execute(
                         """
-                        SELECT id
-                        FROM orders
-                        WHERE status = 'TRIAL'
-                            AND created_at >= datetime('now', '-24 hours')
-                            AND (
-                                mac_address = ?
-                                OR (device_id IS NOT NULL AND device_id != '' AND device_id = ?)
-                            )
-                        LIMIT 1
-                        """,
-                        (mac, device_id),
-                )
-                return cursor.fetchone() is not None
-        finally:
-                conn.close()
-
-
-def get_or_create_device_id(request: Request) -> tuple[str, bool]:
-    raw = (request.cookies.get("wf_device_id") or "").strip()
-    if re.fullmatch(r"[A-Za-z0-9]{24,64}", raw or ""):
+    ROUTERS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "routers_config.json")
+    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
+        routers_list = json.load(f)
+    ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
         return raw, False
     return secrets.token_hex(16), True
 
@@ -190,126 +180,139 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
         return False
 
     connection = None
-    try:
-        connection = routeros_api.RouterOsApiPool(
-            config['ip'],
-            username=config['user'],
-            password=config['pass'],
-            port=config.get('port', 8728),
-            plaintext_login=True,
-        )
-        api = connection.get_api()
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            connection = routeros_api.RouterOsApiPool(
+                config['ip'],
+                username=config['user'],
+                password=config['pass'],
+                port=config.get('port', 8728),
+                plaintext_login=True,
+            )
+            api = connection.get_api()
 
-        binding = api.get_resource('/ip/hotspot/ip-binding')
-        active = api.get_resource('/ip/hotspot/active')
-        user_res = api.get_resource('/ip/hotspot/user')
-        host_res = api.get_resource('/ip/hotspot/host')
-        sched = api.get_resource('/system/scheduler')
+            binding = api.get_resource('/ip/hotspot/ip-binding')
+            active = api.get_resource('/ip/hotspot/active')
+            user_res = api.get_resource('/ip/hotspot/user')
+            host_res = api.get_resource('/ip/hotspot/host')
+            sched = api.get_resource('/system/scheduler')
 
-        user_name = f"T-{mac.replace(':', '')}"
-        user_pass = f"p{int(time.time()) % 1000000}"
+            user_name = f"T-{mac.replace(':', '')}"
+            user_pass = f"p{int(time.time()) % 1000000}"
 
-        # Do not downgrade an already granted TRIAL/PAID session when user opens payment page.
-        if mode == 'PAY_WINDOW':
-            existing_bindings = binding.call('print', queries={'mac-address': mac})
-            for b in existing_bindings:
-                comment = (b.get('comment') or '')
-                if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
-                    return True
+            # Do not downgrade an already granted TRIAL/PAID session when user opens payment page.
+            if mode == 'PAY_WINDOW':
+                existing_bindings = binding.call('print', queries={'mac-address': mac})
+                for b in existing_bindings:
+                    comment = (b.get('comment') or '')
+                    if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                        return True
 
-            existing_users = user_res.call('print', queries={'name': user_name})
-            for u in existing_users:
-                comment = (u.get('comment') or '')
-                if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
-                    return True
+                existing_users = user_res.call('print', queries={'name': user_name})
+                for u in existing_users:
+                    comment = (u.get('comment') or '')
+                    if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                        return True
 
-        for b in binding.call('print', queries={'mac-address': mac}):
-            binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
-        for a in active.call('print', queries={'mac-address': mac}):
-            active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
-        for u in user_res.call('print', queries={'name': user_name}):
-            user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
+            for b in binding.call('print', queries={'mac-address': mac}):
+                binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
+            for a in active.call('print', queries={'mac-address': mac}):
+                active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
+            for u in user_res.call('print', queries={'name': user_name}):
+                user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
 
-        if mode in ('PAY_WINDOW', 'TRIAL'):
-            # Bypass-only: fast activation, no active login needed.
-            # TRIAL uses bypass+scheduler so MikroTik's native enforcement isn't required.
-            binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
-        else:
-            user_res.call('add', arguments={
-                'name': user_name,
-                'password': user_pass,
-                'limit-uptime': f"{minutes}m",
-                'comment': f"{mode}_{mac}",
+            if mode in ('PAY_WINDOW', 'TRIAL'):
+                # Bypass-only: fast activation, no active login needed.
+                # TRIAL uses bypass+scheduler so MikroTik's native enforcement isn't required.
+                binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+            else:
+                user_res.call('add', arguments={
+                    'name': user_name,
+                    'password': user_pass,
+                    'limit-uptime': f"{minutes}m",
+                    'comment': f"{mode}_{mac}",
+                })
+
+                host_ip = None
+                access_mode = "BYPASS"
+
+                for _ in range(5):
+                    hosts = host_res.call('print', queries={'mac-address': mac})
+                    if hosts:
+                        host_ip = hosts[0].get('address')
+                    if host_ip:
+                        login_args = {'user': user_name, 'password': user_pass, 'mac-address': mac, 'ip': host_ip}
+                        try:
+                            active.call('login', arguments=login_args)
+                            time.sleep(0.25)
+                            active_rows = active.call('print', queries={'mac-address': mac})
+                            if active_rows:
+                                access_mode = "ACTIVE"
+                                break
+                        except Exception:
+                            pass
+                    time.sleep(0.35)
+
+                if access_mode != "ACTIVE":
+                    binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+
+            # Use MikroTik's own clock to avoid VPS/router timezone mismatch.
+            # If VPS is UTC+5 but router is UTC, using VPS time would schedule 5 hours late.
+            try:
+                clock_info = api.get_resource('/system/clock').call('print')[0]
+                mt_now = datetime.strptime(
+                    f"{clock_info.get('date', '')} {clock_info.get('time', '')}",
+                    "%b/%d/%Y %H:%M:%S"
+                )
+            except Exception:
+                mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
+            duration_seconds = max(1, int(seconds if seconds is not None else round(minutes * 60)))
+            mt_expiry = mt_now + timedelta(seconds=duration_seconds)
+            mt_date = mt_expiry.strftime("%b/%d/%Y").lower()
+            mt_time = mt_expiry.strftime("%H:%M:%S")
+            task_name = f"del_{mac.replace(':', '')}"
+
+            for t in sched.call('print', queries={'name': task_name}):
+                sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
+
+            on_event = (
+                f'/ip hotspot active remove [find mac-address="{mac}"]; '
+                f'/ip hotspot cookie remove [find user="{user_name}"]; '
+                f'/ip hotspot host remove [find mac-address="{mac}"]; '
+                f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
+                f'/ip hotspot user remove [find name="{user_name}"]; '
+                f'/system scheduler remove [find name="{task_name}"];'
+            )
+            sched.call('add', arguments={
+                'name': task_name,
+                'start-date': mt_date,
+                'start-time': mt_time,
+                'interval': "00:00:00",
+                'on-event': on_event,
+                'comment': f"AUTOCLEAR_{mode}_{mac}",
             })
 
-            host_ip = None
-            access_mode = "BYPASS"
-
-            for _ in range(5):
-                hosts = host_res.call('print', queries={'mac-address': mac})
-                if hosts:
-                    host_ip = hosts[0].get('address')
-                if host_ip:
-                    login_args = {'user': user_name, 'password': user_pass, 'mac-address': mac, 'ip': host_ip}
-                    try:
-                        active.call('login', arguments=login_args)
-                        time.sleep(0.25)
-                        active_rows = active.call('print', queries={'mac-address': mac})
-                        if active_rows:
-                            access_mode = "ACTIVE"
-                            break
-                    except Exception:
-                        pass
-                time.sleep(0.35)
-
-            if access_mode != "ACTIVE":
-                binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
-
-        # Use MikroTik's own clock to avoid VPS/router timezone mismatch.
-        # If VPS is UTC+5 but router is UTC, using VPS time would schedule 5 hours late.
-        try:
-            clock_info = api.get_resource('/system/clock').call('print')[0]
-            mt_now = datetime.strptime(
-                f"{clock_info.get('date', '')} {clock_info.get('time', '')}",
-                "%b/%d/%Y %H:%M:%S"
-            )
-        except Exception:
-            mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
-        duration_seconds = max(1, int(seconds if seconds is not None else round(minutes * 60)))
-        mt_expiry = mt_now + timedelta(seconds=duration_seconds)
-        mt_date = mt_expiry.strftime("%b/%d/%Y").lower()
-        mt_time = mt_expiry.strftime("%H:%M:%S")
-        task_name = f"del_{mac.replace(':', '')}"
-
-        for t in sched.call('print', queries={'name': task_name}):
-            sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
-
-        on_event = (
-            f'/ip hotspot active remove [find mac-address="{mac}"]; '
-            f'/ip hotspot cookie remove [find user="{user_name}"]; '
-            f'/ip hotspot host remove [find mac-address="{mac}"]; '
-            f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
-            f'/ip hotspot user remove [find name="{user_name}"]; '
-            f'/system scheduler remove [find name="{task_name}"];'
-        )
-        sched.call('add', arguments={
-            'name': task_name,
-            'start-date': mt_date,
-            'start-time': mt_time,
-            'interval': "00:00:00",
-            'on-event': on_event,
-            'comment': f"AUTOCLEAR_{mode}_{mac}",
-        })
-
-        if mode in ['PAID', 'PAY_WINDOW']:
-            logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
-        return True
-    except Exception as e:
-        logger.error(f"MikroTik API error for {router_id}: {str(e)[:100]}")
-        return False
-    finally:
-        if connection:
-            connection.disconnect()
+            if mode in ['PAID', 'PAY_WINDOW']:
+                logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
+            return True
+        except Exception as e:
+            logger.error(f"MikroTik API error for {router_id} (attempt {attempt}/{max_retries}): {str(e)[:200]}")
+            if connection:
+                try:
+                    connection.disconnect()
+                except Exception:
+                    pass
+            if attempt == max_retries:
+                logger.error(f"❌ Не удалось подключиться к роутеру {router_id} после {max_retries} попыток.")
+                return False
+            time.sleep(1)
+        finally:
+            if connection:
+                try:
+                    connection.disconnect()
+                except Exception:
+                    pass
 
 
 # --- МАРШРУТЫ ---
@@ -401,14 +404,18 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     """Активирует окно оплаты и редиректит на FreedomPay"""
     # Валидация
     if amount not in [200]:
-        return JSONResponse({"error": "Некорректная сумма"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
+        return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
-        return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
-    
+        return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
+
+    if router_id not in ROUTERS_CONFIG:
+        logger.error(f"[start_payment] Неизвестный router_id: {router_id}")
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    logger.info(f"[start_payment] set_mikrotik_ah_access mac={mac}, router_id={router_id}, user-agent={request.headers.get('user-agent')}")
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        # Возвращаем ошибку только латиницей для теста кодировки
-        return JSONResponse({"error": "Activation error"}, status_code=500, headers={"Content-Type": "application/json; charset=utf-8"})
+        return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
 
     payment_order_id = str(int(time.time() * 1000))
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -430,7 +437,13 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
     """Welcome step: Android without grant, iOS/others with short PAY_WINDOW grant"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         logger.warning(f"[activate_welcome] Некорректный MAC: {mac}")
-        return JSONResponse({"error": "Некорректный MAC"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
+        return utf8_json_response({"error": "Некорректный MAC"}, status_code=400)
+
+    if router_id not in ROUTERS_CONFIG:
+        logger.error(f"[activate_welcome] Неизвестный router_id: {router_id}")
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    logger.info(f"[activate_welcome] mac={mac}, router_id={router_id}, user-agent={request.headers.get('user-agent')}")
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_android = "android" in user_agent
@@ -450,7 +463,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
     if not granted:
         logger.error(f"[activate_welcome] Ошибка активации доступа для mac={mac}, router_id={router_id}")
-        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
+        return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
 
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
@@ -476,18 +489,24 @@ async def get_free_trial(
 ):
     """Выдача 15 минут бесплатного доступа (1 раз в сутки)"""
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
-        return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
+        return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
+
+    if router_id not in ROUTERS_CONFIG:
+        logger.error(f"[get_free_trial] Неизвестный router_id: {router_id}")
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    logger.info(f"[get_free_trial] set_mikrotik_ah_access mac={mac}, router_id={router_id}, user-agent={request.headers.get('user-agent')}")
 
     if is_trial_rate_limited(request):
-        return JSONResponse({"error": "Слишком много попыток. Подождите 10 минут и повторите."}, status_code=429, headers={"Content-Type": "application/json; charset=utf-8"})
+        return utf8_json_response({"error": "Слишком много попыток. Подождите 10 минут и повторите."}, status_code=429)
 
     if not is_valid_trial_signature(mac, router_id, trial_ts, trial_sig):
-        return JSONResponse({"error": "Сессия истекла. Обновите страницу и попробуйте снова."}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
+        return utf8_json_response({"error": "Сессия истекла. Обновите страницу и попробуйте снова."}, status_code=400)
 
     device_id, is_new_device_id = get_or_create_device_id(request)
 
     if check_trial_used_last_24h(mac, device_id):
-        blocked = JSONResponse({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403, headers={"Content-Type": "application/json; charset=utf-8"})
+        blocked = utf8_json_response({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403)
         if is_new_device_id:
             blocked.set_cookie(
                 key="wf_device_id",
@@ -501,7 +520,7 @@ async def get_free_trial(
         return blocked
 
     if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
-        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500, headers={"Content-Type": "application/json; charset=utf-8"})
+        return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
     
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
