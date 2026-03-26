@@ -254,12 +254,12 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
 
             # ИСПРАВЛЕНИЕ СИНТАКСИСА MIKROTIK (ДОБАВЛЕНЫ ПРОБЕЛЫ ПЕРЕД [find])
             on_event = (
-                f'/ip hotspot active remove [find mac-address="{mac}"]; '
-                f'/ip hotspot cookie remove [find user="{user_name}"]; '
-                f'/ip hotspot host remove [find mac-address="{mac}"]; '
-                f'/ip hotspot ip-binding remove[find mac-address="{mac}"]; '
-                f'/ip hotspot user remove[find name="{user_name}"]; '
-                f'/system scheduler remove [find name="{task_name}"];'
+                f':do {{ /ip hotspot active remove[find mac-address="{mac}"] }} on-error={{}}; '
+                f':do {{ /ip hotspot cookie remove[find mac-address="{mac}"] }} on-error={{}}; '
+                f':do {{ /ip hotspot host remove [find mac-address="{mac}"] }} on-error={{}}; '
+                f':do {{ /ip hotspot ip-binding remove [find mac-address="{mac}"] }} on-error={{}}; '
+                f':do {{ /ip hotspot user remove [find name="{user_name}"] }} on-error={{}}; '
+                f':do {{ /system scheduler remove [find name="{task_name}"] }} on-error={{}}; '
             )
             sched.call('add', arguments={
                 'name': task_name,
