@@ -37,6 +37,12 @@ ROUTERS_CONFIG = {
         "user": "admin",
         "pass": "kaspiwifiadmin2026",
         "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
+    },
+    "astana_03": {
+        "ip": "10.0.0.4",
+        "user": "admin",
+        "pass": "kaspiwifiadmin2026",
+        "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
     }
 }
 
@@ -389,13 +395,13 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     """Активирует окно оплаты и редиректит на FreedomPay"""
     # Валидация
     if amount not in [200]:
-        return JSONResponse({"error": "Некорректная сумма"}, status_code=400)
+        return JSONResponse({"error": "Некорректная сумма"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
-        return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
+        return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
     
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
+        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500, headers={"Content-Type": "application/json; charset=utf-8"})
 
     payment_order_id = str(int(time.time() * 1000))
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -416,7 +422,7 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
 async def activate_welcome(request: Request, mac: str, router_id: str = "astana_01"):
     """Welcome step: Android without grant, iOS/others with short PAY_WINDOW grant"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
-        return JSONResponse({"error": "Некорректный MAC"}, status_code=400)
+        return JSONResponse({"error": "Некорректный MAC"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_android = "android" in user_agent
@@ -466,15 +472,15 @@ async def get_free_trial(
         return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
 
     if is_trial_rate_limited(request):
-        return JSONResponse({"error": "Слишком много попыток. Подождите 10 минут и повторите."}, status_code=429)
+        return JSONResponse({"error": "Слишком много попыток. Подождите 10 минут и повторите."}, status_code=429, headers={"Content-Type": "application/json; charset=utf-8"})
 
     if not is_valid_trial_signature(mac, router_id, trial_ts, trial_sig):
-        return JSONResponse({"error": "Сессия истекла. Обновите страницу и попробуйте снова."}, status_code=400)
+        return JSONResponse({"error": "Сессия истекла. Обновите страницу и попробуйте снова."}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
 
     device_id, is_new_device_id = get_or_create_device_id(request)
 
     if check_trial_used_last_24h(mac, device_id):
-        blocked = JSONResponse({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403)
+        blocked = JSONResponse({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403, headers={"Content-Type": "application/json; charset=utf-8"})
         if is_new_device_id:
             blocked.set_cookie(
                 key="wf_device_id",
@@ -488,7 +494,7 @@ async def get_free_trial(
         return blocked
 
     if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
-        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
+        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500, headers={"Content-Type": "application/json; charset=utf-8"})
     
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
