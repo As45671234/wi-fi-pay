@@ -394,8 +394,7 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
     
-    # iPhone flow: short bridge window to open browser, then real 3-min PAY_WINDOW is granted on pay click.
-    if not set_mikrotik_ah_access(mac, router_id, minutes=1, mode="PAY_WINDOW", seconds=10):
+    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
 
     payment_order_id = str(int(time.time() * 1000))
