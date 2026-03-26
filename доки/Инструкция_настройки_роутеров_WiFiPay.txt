@@ -99,6 +99,9 @@ WireGuard -> New interface wireguard1
 
 6.2 На VPS
 В /etc/wireguard/wg0.conf добавить peer нового роутера:
+
+sudo nano /etc/wireguard/wg0.conf
+
 [Peer]
 PublicKey = <public_key_роутера>
 AllowedIPs = 10.0.0.X/32
@@ -117,17 +120,30 @@ ping -c 3 10.0.0.X
 0) Создать API user (если нет):
 /user add name=admin password=kaspiwifiadmin2026 group=full
 
-1) Включить API только для VPS WG IP:
-/ip service set api disabled=no port=8728 address=10.0.0.1/32
+1) Включить API ТОЛЬКО на всех интерфейсах (важно для новых RouterOS):
+/ip service set api disabled=no port=8728 address=0.0.0.0/0
+(Или address=10.0.0.1/32 если хотите строже, но часто бывают проблемы с привязкой к IP)
 
-2) Разрешить вход в firewall:
-/ip firewall filter add chain=input action=accept protocol=tcp src-address=10.0.0.1 dst-port=8728 in-interface=wireguard1 comment="allow_api_from_vps"
+2) Разрешить вход в firewall (ОБЯЗАТЕЛЬНО для VPS):
+/ip firewall filter add chain=input action=accept protocol=tcp src-address=10.0.0.1 dst-port=8728 in-interface=wireguard1 comment="allow_api_from_vps" place-before=0
 
-3) Убедиться, что allow-правило стоит выше общего drop not from LAN.
+3) Разрешить FORWARDING для интернета клиентов:
+/ip firewall filter add chain=forward action=accept in-interface=bridge out-interface=ether1 comment="FORWARD_LAN_TO_WAN"
+/ip firewall filter add chain=forward action=accept in-interface=ether1 out-interface=bridge comment="FORWARD_WAN_TO_LAN"
+
+4) Добавить WireGuard в список LAN интерфейсов (чтобы не дропало):
+/interface list member add list=LAN interface=wireguard1
+
+5) Убедиться, что NAT для интернета включен:
+/ip firewall nat add chain=srcnat action=masquerade out-interface=ether1 comment="NAT_TO_INTERNET"
+
+6) /ip address add address=10.0.0.X/24 interface=wireguard1
+Без IP-адреса на интерфейсе туннель не работает
 
 Проверка с VPS:
-nc -vz -w3 10.0.0.X 8728
-Ожидается: succeeded/open
+1. nc -vz -w3 10.0.0.X 8728  => должно быть succeeded
+2. ping 10.0.0.X             => должно пинговаться
+
 
 ============================================================
 8) BACKEND (VPS)
@@ -187,3 +203,15 @@ ROUTER_IPS=10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7 ./list_clients.
 [ ] Trial и оплата проверены
 
 Конец документа.
+
+
+
+
+/ip firewall mangle add chain=forward action=change-mss new-mss=1300 passthrough=yes tcp-flags=syn protocol=tcp tcp-mss=1301-65535 comment="MTU_FIX"
+
+
+# Удаляем старое правило, чтобы не было дублей
+/ip firewall mangle remove [find comment="MTU_FIX"]
+
+# Добавляем новое правило и ставим его В САМЫЙ ВЕРХ (place-before=0)
+/ip firewall mangle add chain=forward action=change-mss new-mss=1300 passthrough=yes tcp-flags=syn protocol=tcp tcp-mss=1301-65535 comment="MTU_FIX" place-before=0
