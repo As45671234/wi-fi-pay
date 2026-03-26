@@ -146,6 +146,74 @@ def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig:
 
 init_db()
 
+# --- ДИАГНОСТИКА РОУТЕРОВ ---
+
+def verify_access_activated(api, mac: str, user_name: str, mode: str) -> dict:
+    """Проверяет что доступ РЕАЛЬНО был активирован на MikroTik"""
+    result = {
+        "binding_exists": False,
+        "user_exists": False,
+        "mode": mode
+    }
+    
+    try:
+        binding = api.get_resource('/ip/hotspot/ip-binding')
+        bindings = binding.call('print', queries={'mac-address': mac})
+        if bindings:
+            for b in bindings:
+                comment = b.get('comment', '')
+                if mode in comment:
+                    result["binding_exists"] = True
+                    logger.debug(f"  ✓ Биндинг найден: {comment}")
+                    break
+        else:
+            logger.debug(f"  ⚠️ Биндинга не найдено для {mac}")
+    except Exception as e:
+        logger.warning(f"  Ошибка проверки биндинга: {str(e)[:100]}")
+
+    try:
+        user_res = api.get_resource('/ip/hotspot/user')
+        users = user_res.call('print', queries={'name': user_name})
+        if users:
+            for u in users:
+                comment = u.get('comment', '')
+                if mode in comment:
+                    result["user_exists"] = True
+                    logger.debug(f"  ✓ Юзер найден: {comment}")
+                    break
+        else:
+            logger.debug(f"  ⚠️ Юзера не найдено: {user_name}")
+    except Exception as e:
+        logger.warning(f"  Ошибка проверки юзера: {str(e)[:100]}")
+
+    return result
+
+def check_router_hotspot_enabled(config: dict) -> bool:
+    """Проверяет что hotspot включен на роутере"""
+    try:
+        connection = routeros_api.RouterOsApiPool(
+            config['ip'],
+            username=config['user'],
+            password=config['pass'],
+            port=config.get('port', 8728),
+            plaintext_login=True,
+        )
+        api = connection.get_api()
+        
+        # Проверяем статус hotspot
+        hotspot_profiles = api.get_resource('/ip/hotspot/profile').call('print')
+        if not hotspot_profiles:
+            logger.error(f"  ❌ На роутере {config['ip']} нет профилей hotspot!")
+            connection.disconnect()
+            return False
+        
+        logger.info(f"  ✓ Hotspot профили найдены на {config['ip']}")
+        connection.disconnect()
+        return True
+    except Exception as e:
+        logger.error(f"  ❌ Не удалось проверить hotspot на {config['ip']}: {str(e)[:150]}")
+        return False
+
 # --- ЯДРО: MIKROTIK API (СТАТУС A H) ---
 
 def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, seconds: int | None = None):
@@ -312,6 +380,14 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА при создании scheduler {task_name}: {str(e)[:150]}")
                 raise
 
+            # ПРОВЕРКА: что реально было добавлено
+            logger.info(f"[VERIFY] Проверяю что {mode} реально активирован...")
+            verify_result = verify_access_activated(api, mac, user_name, mode)
+            if verify_result["binding_exists"] or verify_result["user_exists"]:
+                logger.info(f"✅ ПОДТВЕРЖЕНО: {mode} активирован для {mac[:8]}*** ({'биндинг' if verify_result['binding_exists'] else 'юзер'})")
+            else:
+                logger.error(f"⚠️ ВНИМАНИЕ: {mode} МОЖЕТ НЕ АКТИВИРОВАН для {mac[:8]}*** (проверить на роутере вручную!)")
+
             if mode in['PAID', 'PAY_WINDOW']:
                 logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
             return True
@@ -396,6 +472,149 @@ async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
     return response
 
 
+@app.get("/health")
+async def health_check():
+    """Диагностика всех роутеров"""
+    logger.info("🩺 HEALTH CHECK: проверка всех роутеров...")
+    health_report = {
+        "timestamp": datetime.now(KZ_TZ).isoformat(),
+        "routers": {}
+    }
+    
+    for router_id, config in ROUTERS_CONFIG.items():
+        logger.info(f"  Проверяю {router_id} ({config['ip']})...")
+        status = {
+            "ip": config['ip'],
+            "connectivity": False,
+            "hotspot_enabled": False,
+            "details": ""
+        }
+        
+        try:
+            connection = routeros_api.RouterOsApiPool(
+                config['ip'],
+                username=config['user'],
+                password=config['pass'],
+                port=config.get('port', 8728),
+                plaintext_login=True,
+            )
+            api = connection.get_api()
+            
+            # Проверяем связь
+            identity = api.get_resource('/system/identity').call('print')
+            if identity:
+                status["connectivity"] = True
+                status["details"] = f"Identity: {identity[0].get('name', 'N/A')}"
+                logger.info(f"    ✓ Связь: OK ({status['details']})")
+            
+            # Проверяем hotspot
+            hotspot_enabled = check_router_hotspot_enabled(config)
+            status["hotspot_enabled"] = hotspot_enabled
+            if hotspot_enabled:
+                logger.info(f"    ✓ Hotspot: ENABLED")
+            else:
+                logger.warning(f"    ❌ Hotspot: DISABLED или ошибка конфигурации!")
+                status["details"] += " | Hotspot: PROBLEM"
+            
+            connection.disconnect()
+        except Exception as e:
+            logger.error(f"    ❌ Ошибка подключения: {str(e)[:150]}")
+            status["details"] = f"Error: {str(e)[:100]}"
+        
+        health_report["routers"][router_id] = status
+    
+    logger.info(f"🩺 HEALTH CHECK завершен")
+    return utf8_json_response(health_report)
+
+
+@app.get("/debug")
+async def debug_router_status(mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+    """Подробная диагностика конкретного MAC на роутере"""
+    logger.info(f"🔍 DEBUG запрос: MAC={mac}, router={router_id}")
+    
+    config = ROUTERS_CONFIG.get(router_id)
+    if not config:
+        return utf8_json_response({"error": f"Неизвестный router_id: {router_id}"}, status_code=400)
+    
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
+        return utf8_json_response({"error": f"Некорректный MAC: {mac}"}, status_code=400)
+    
+    debug_info = {
+        "mac": mac,
+        "router_id": router_id,
+        "router_ip": config['ip'],
+        "bindings": [],
+        "active_sessions": [],
+        "users": [],
+        "schedulers": []
+    }
+    
+    try:
+        connection = routeros_api.RouterOsApiPool(
+            config['ip'],
+            username=config['user'],
+            password=config['pass'],
+            port=config.get('port', 8728),
+            plaintext_login=True,
+        )
+        api = connection.get_api()
+        
+        # Биндинги
+        binding = api.get_resource('/ip/hotspot/ip-binding')
+        bindings = binding.call('print', queries={'mac-address': mac})
+        for b in bindings:
+            debug_info["bindings"].append({
+                "type": b.get('type'),
+                "comment": b.get('comment'),
+                "id": b.get('id')
+            })
+        
+        # Активные сессии
+        active = api.get_resource('/ip/hotspot/active')
+        active_sessions = active.call('print', queries={'mac-address': mac})
+        for a in active_sessions:
+            debug_info["active_sessions"].append({
+                "user": a.get('user'),
+                "address": a.get('address'),
+                "uptime": a.get('uptime'),
+                "id": a.get('id')
+            })
+        
+        # Юзеры с этим MAC
+        user_res = api.get_resource('/ip/hotspot/user')
+        users = user_res.call('print')
+        for u in users:
+            if mac in (u.get('comment', '') or ''):
+                debug_info["users"].append({
+                    "name": u.get('name'),
+                    "comment": u.get('comment'),
+                    "id": u.get('id')
+                })
+        
+        # Schedulers для этого MAC
+        sched = api.get_resource('/system/scheduler')
+        task_name_pattern = mac.replace(':', '')
+        all_schedulers = sched.call('print')
+        for s in all_schedulers:
+            name = s.get('name', '')
+            if task_name_pattern in name:
+                debug_info["schedulers"].append({
+                    "name": name,
+                    "start-date": s.get('start-date'),
+                    "start-time": s.get('start-time'),
+                    "comment": s.get('comment'),
+                    "id": s.get('id')
+                })
+        
+        connection.disconnect()
+        logger.info(f"🔍 DEBUG: найдено {len(debug_info['bindings'])} биндингов, {len(debug_info['active_sessions'])} активных, {len(debug_info['schedulers'])} schedulers")
+    except Exception as e:
+        logger.error(f"🔍 DEBUG: ошибка: {str(e)[:150]}")
+        return utf8_json_response({"error": str(e)}, status_code=500)
+    
+    return utf8_json_response(debug_info)
+
+
 @app.get("/payment_methods", response_class=HTMLResponse)
 @app.get("/payment_methods.html", response_class=HTMLResponse)
 async def payment_methods_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
@@ -432,6 +651,8 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
         return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
 
     logger.info(f"[start_payment] ✓ PAY_WINDOW активирован, инициирую платеж на {amount} ₸")
+    logger.info(f"[start_payment] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
+    
     payment_order_id = str(int(time.time() * 1000))
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
@@ -491,6 +712,9 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
     finally:
         conn.close()
 
+    logger.info(f"[activate_welcome] ✅ УСПЕХ: PAY_WINDOW активирован, редирект на /tariffs")
+    logger.info(f"[activate_welcome] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
+
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
     return RedirectResponse(url=tariff_url, status_code=302)
 
@@ -541,6 +765,9 @@ async def get_free_trial(
     if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
         logger.error(f"[get_free_trial] ❌ Ошибка активации TRIAL для {mac[:8]}*** на {router_id}")
         return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
+    
+    logger.info(f"[get_free_trial] ✓ TRIAL активирован на 15 минут для {mac[:8]}***")
+    logger.info(f"[get_free_trial] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
     
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
@@ -646,6 +873,7 @@ async def payment_result(request: Request):
                 )
             conn.commit()
             logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ обработано для {mac[:8]}*** на 24 часа ({minutes} минут)")
+            logger.info(f"[payment_result] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
         finally:
             conn.close()
 
