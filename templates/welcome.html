@@ -80,6 +80,7 @@
     const macAddress = urlParams.get('mac') || "{{ mac }}";
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
     const isAndroid = /android/i.test(navigator.userAgent || '');
+    const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
     
     // Update link href if URL params exist
     if (macAddress && routerId) {
@@ -90,6 +91,10 @@
             if (isAndroid) {
                 const fallbackUrl = `https://wifi-pay.kz${activatePath}`;
                 link.href = `intent://wifi-pay.kz${activatePath}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
+            } else if (isIOS) {
+                link.href = `https://wifi-pay.kz${activatePath}`;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
             } else {
                 link.href = activatePath;
             }

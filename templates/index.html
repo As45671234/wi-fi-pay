@@ -28,6 +28,11 @@
         .trial-success { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
         .trial-success-title { font-weight: 700; margin-bottom: 0.35rem; }
         .trial-success-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
+        .trial-notice { display: none; margin-top: 0.9rem; border-radius: 1rem; padding: 0.9rem 1rem; text-align: left; }
+        .trial-notice.warn { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
+        .trial-notice.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+        .trial-notice-title { font-size: 0.92rem; font-weight: 700; margin-bottom: 0.2rem; }
+        .trial-notice-text { font-size: 0.86rem; line-height: 1.3; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
         
@@ -77,6 +82,10 @@
                 <div class="trial-success-title">Доступ открыт на 15 минут</div>
                 <div class="trial-success-text">Нажмите «Готово» вверху справа и продолжайте пользоваться интернетом.</div>
             </div>
+            <div id="trial-notice" class="trial-notice">
+                <div id="trial-notice-title" class="trial-notice-title"></div>
+                <div id="trial-notice-text" class="trial-notice-text"></div>
+            </div>
         </div>
         
         <div class="mac-id">ID: {{ mac }}</div>
@@ -119,8 +128,10 @@
         const payBtn = document.getElementById('main-pay-btn');
         const trialBtn = document.getElementById('trial-btn');
         const trialSuccess = document.getElementById('trial-success');
+        const trialNotice = document.getElementById('trial-notice');
         btnArea.style.display = 'block';
         trialSuccess.style.display = 'none';
+        trialNotice.style.display = 'none';
 
         if (amount === 0) {
             trialBtn.style.display = 'block';
@@ -177,8 +188,19 @@
     async function getTrial() {
         const btn = document.getElementById('trial-btn');
         const successBox = document.getElementById('trial-success');
+        const notice = document.getElementById('trial-notice');
+        const noticeTitle = document.getElementById('trial-notice-title');
+        const noticeText = document.getElementById('trial-notice-text');
         btn.disabled = true;
         successBox.style.display = 'none';
+        notice.style.display = 'none';
+
+        function showTrialNotice(kind, title, text) {
+            notice.className = `trial-notice ${kind}`;
+            noticeTitle.textContent = title;
+            noticeText.textContent = text;
+            notice.style.display = 'block';
+        }
 
         const fd = new FormData();
         fd.append('mac', macAddress);
@@ -194,11 +216,15 @@
                 successBox.style.display = 'block';
                 btn.innerText = '15 МИНУТ АКТИВИРОВАНО';
             } else {
-                alert(data.error || "Ошибка роутера");
+                if (response.status === 403) {
+                    showTrialNotice('warn', 'Лимит бесплатного доступа', data.error || 'Этот тариф можно включать только 1 раз в 24 часа.');
+                } else {
+                    showTrialNotice('error', 'Не удалось включить 15 минут', data.error || 'Роутер не ответил. Попробуйте еще раз.');
+                }
                 btn.disabled = false;
             }
         } catch (e) {
-            alert("Роутер не ответил. Попробуйте еще раз.");
+            showTrialNotice('error', 'Ошибка подключения', 'Роутер не ответил. Проверьте Wi-Fi и попробуйте еще раз.');
             btn.disabled = false;
         }
     }
