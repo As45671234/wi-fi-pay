@@ -43,6 +43,12 @@ ROUTERS_CONFIG = {
         "user": "admin",
         "pass": "kaspiwifiadmin2026",
         "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
+    },
+    "astana_04": {
+        "ip": "10.0.0.5",
+        "user": "admin",
+        "pass": "kaspiwifiadmin2026",
+        "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
     }
 }
 
