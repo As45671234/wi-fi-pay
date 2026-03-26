@@ -6,6 +6,7 @@ import logging
 import sqlite3
 import re
 import secrets
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode, unquote
@@ -70,6 +71,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
+# --- ЗАГРУЗКА КОНФИГА РОУТЕРОВ ИЗ ФАЙЛА (если есть) ---
+ROUTERS_CONFIG_PATH = os.path.join(BASE_DIR, "routers_config.json")
+if os.path.exists(ROUTERS_CONFIG_PATH):
+    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
+        routers_list = json.load(f)
+    ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
+
 # --- БАЗА ДАННЫХ ---
 
 def init_db():
@@ -96,8 +104,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
-    import json
 def get_db_connection():
     """Context manager для безопасной работы с БД"""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -106,21 +112,29 @@ def get_db_connection():
     finally:
         conn.close()
 
-
-def check_trial_used_last_24h(mac: str, device_id: str) -> bool:
-        """Return True when trial was used by MAC or device_id in last 24 hours."""
-        conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
-        try:
-                cursor = conn.cursor()
-                cursor.execute(
-                        """
-    ROUTERS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "routers_config.json")
-    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
-        routers_list = json.load(f)
-    ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
-        return raw, False
+def get_or_create_device_id(request: Request):
+    """Получает или создает уникальный ID устройства из куки"""
+    device_id = request.cookies.get("wf_device_id")
+    if device_id:
+        return device_id, False
     return secrets.token_hex(16), True
 
+def check_trial_used_last_24h(mac: str, device_id: str) -> bool:
+    """Return True when trial was used by MAC or device_id in last 24 hours."""
+    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id FROM orders 
+            WHERE (mac_address = ? OR device_id = ?) 
+              AND status = 'TRIAL' 
+              AND created_at > datetime('now', '-1 day')
+            """, (mac, device_id)
+        )
+        return cursor.fetchone() is not None
+    finally:
+        conn.close()
 
 def get_client_ip(request: Request) -> str:
     xff = (request.headers.get("x-forwarded-for") or "").strip()
@@ -129,11 +143,10 @@ def get_client_ip(request: Request) -> str:
     client = request.client
     return (client.host if client else "unknown") or "unknown"
 
-
 def is_trial_rate_limited(request: Request) -> bool:
     ip = get_client_ip(request)
     now = int(time.time())
-    recent = [
+    recent =[
         ts for ts in TRIAL_RATE_BUCKET.get(ip, [])
         if now - ts < TRIAL_RATE_LIMIT_WINDOW_SECONDS
     ]
@@ -144,11 +157,9 @@ def is_trial_rate_limited(request: Request) -> bool:
     TRIAL_RATE_BUCKET[ip] = recent
     return False
 
-
 def make_trial_signature(mac: str, router_id: str, trial_ts: str) -> str:
     payload = f"{mac}|{router_id}|{trial_ts}"
     return hmac.new(SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
-
 
 def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig: str) -> bool:
     if not trial_ts or not re.fullmatch(r"\d{10}", trial_ts):
@@ -162,12 +173,9 @@ def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig:
     expected = make_trial_signature(mac, router_id, trial_ts)
     return hmac.compare_digest(expected, trial_sig.lower())
 
-
 init_db()
 
-
 # --- ЯДРО: MIKROTIK API (СТАТУС A H) ---
-
 
 def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, seconds: int | None = None):
     config = ROUTERS_CONFIG.get(router_id)
@@ -258,7 +266,6 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                     binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
 
             # Use MikroTik's own clock to avoid VPS/router timezone mismatch.
-            # If VPS is UTC+5 but router is UTC, using VPS time would schedule 5 hours late.
             try:
                 clock_info = api.get_resource('/system/clock').call('print')[0]
                 mt_now = datetime.strptime(
@@ -280,8 +287,8 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 f'/ip hotspot active remove [find mac-address="{mac}"]; '
                 f'/ip hotspot cookie remove [find user="{user_name}"]; '
                 f'/ip hotspot host remove [find mac-address="{mac}"]; '
-                f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
-                f'/ip hotspot user remove [find name="{user_name}"]; '
+                f'/ip hotspot ip-binding remove[find mac-address="{mac}"]; '
+                f'/ip hotspot user remove[find name="{user_name}"]; '
                 f'/system scheduler remove [find name="{task_name}"];'
             )
             sched.call('add', arguments={
@@ -293,7 +300,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 'comment': f"AUTOCLEAR_{mode}_{mac}",
             })
 
-            if mode in ['PAID', 'PAY_WINDOW']:
+            if mode in['PAID', 'PAY_WINDOW']:
                 logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
             return True
         except Exception as e:
@@ -323,7 +330,6 @@ def get_signature(script_name, params, secret_key):
     sig_str = f"{script_name};{';'.join(values)};{secret_key}"
     return hashlib.md5(sig_str.encode('utf-8')).hexdigest()
 
-
 def decode_nested_url_value(value: str) -> str:
     if value is None:
         return ""
@@ -334,7 +340,6 @@ def decode_nested_url_value(value: str) -> str:
             break
         decoded = next_value
     return decoded
-
 
 def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str) -> str:
     # Currently only one paid tariff: 200₸ = безлимит на день (1440 min)
@@ -403,7 +408,7 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01"):
     """Активирует окно оплаты и редиректит на FreedomPay"""
     # Валидация
-    if amount not in [200]:
+    if amount not in[200]:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
@@ -447,7 +452,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_android = "android" in user_agent
-    is_ios = any(device in user_agent for device in ["iphone", "ipad", "ipod"])
+    is_ios = any(device in user_agent for device in["iphone", "ipad", "ipod"])
 
     if is_android:
         logger.info(f"[activate_welcome] Android detected, mac={mac}, только редирект на /tariffs, доступ не выдается")
