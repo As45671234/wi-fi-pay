@@ -429,27 +429,27 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
 async def activate_welcome(request: Request, mac: str, router_id: str = "astana_01"):
     """Welcome step: Android without grant, iOS/others with short PAY_WINDOW grant"""
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
+        logger.warning(f"[activate_welcome] Некорректный MAC: {mac}")
         return JSONResponse({"error": "Некорректный MAC"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_android = "android" in user_agent
+    is_ios = any(device in user_agent for device in ["iphone", "ipad", "ipod"])
 
-    # Android captive portal tends to close early if internet is granted on welcome step.
-    # Keep welcome as pure navigation for Android, but preserve current iOS behavior.
     if is_android:
+        logger.info(f"[activate_welcome] Android detected, mac={mac}, только редирект на /tariffs, доступ не выдается")
         tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
         return RedirectResponse(url=tariff_url, status_code=302)
 
-    user_agent = (request.headers.get("user-agent") or "").lower()
-    is_ios = any(device in user_agent for device in ["iphone", "ipad", "ipod"])
-
-    # iPhone payment window: 1 min 30 sec. Others keep current 3-minute behavior.
     if is_ios:
         granted = set_mikrotik_ah_access(mac, router_id, minutes=1, mode="PAY_WINDOW", seconds=90)
+        logger.info(f"[activate_welcome] iOS detected, mac={mac}, выдан доступ на 90 секунд: {granted}")
     else:
         granted = set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW")
+        logger.info(f"[activate_welcome] Other device, mac={mac}, выдан доступ на 3 минуты: {granted}")
 
     if not granted:
+        logger.error(f"[activate_welcome] Ошибка активации доступа для mac={mac}, router_id={router_id}")
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
 
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
