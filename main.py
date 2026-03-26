@@ -401,7 +401,8 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
         return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400, headers={"Content-Type": "application/json; charset=utf-8"})
     
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500, headers={"Content-Type": "application/json; charset=utf-8"})
+        # Возвращаем ошибку только латиницей для теста кодировки
+        return JSONResponse({"error": "Activation error"}, status_code=500, headers={"Content-Type": "application/json; charset=utf-8"})
 
     payment_order_id = str(int(time.time() * 1000))
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
