@@ -5,9 +5,17 @@ __pycache__/
 
 # Environment variables
 .env
+.env.local
+.env.production
 
 # Local runtime database
 gateway.db
+gateway.db-*
+
+# Backups
+*.bak
+*.backup
+backups/
 
 # IDE
 .vscode/
@@ -15,7 +23,23 @@ gateway.db
 *.swp
 *.swo
 *~
+*.sublime-workspace
 
 # OS
 .DS_Store
 Thumbs.db
+*.log
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# Test files
+.pytest_cache/
+.coverage
+
+# Temporary
+*.tmp
+*.temp
+

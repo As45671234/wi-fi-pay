@@ -1,0 +1,30 @@
+[Unit]
+Description=WiFi-Pay Captive Portal Service
+Documentation=https://github.com/As45671234/wi-fi-pay
+After=network.target wg-quick@wg0.service
+RequiresMountsFor=/home/ubuntu/wi-fi-pay
+
+[Service]
+Type=notify
+User=ubuntu
+WorkingDirectory=/home/ubuntu/wi-fi-pay
+Environment="PATH=/home/ubuntu/wi-fi-pay/venv/bin"
+ExecStart=/home/ubuntu/wi-fi-pay/venv/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+
+# Автоперезагрузка при крахе
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wifi-pay
+
+# Безопасность
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
