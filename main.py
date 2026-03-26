@@ -179,9 +179,9 @@ init_db()
 # --- ЯДРО: MIKROTIK API (СТАТУС A H) ---
 
 
-def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, seconds: int | None = None):
-    import asyncio
-    import concurrent.futures
+import asyncio
+import concurrent.futures
+async def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, seconds: int | None = None):
     def mikrotik_job():
         config = ROUTERS_CONFIG.get(router_id)
         if not config:
@@ -293,16 +293,13 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
         finally:
             if connection:
                 connection.disconnect()
-    # Асинхронный запуск с таймаутом
-    async def run_with_timeout():
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            try:
-                return await asyncio.wait_for(loop.run_in_executor(pool, mikrotik_job), timeout=10)
-            except asyncio.TimeoutError:
-                logger.error(f"MikroTik API timeout for {router_id}")
-                return False
-    return asyncio.run(run_with_timeout())
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        try:
+            return await asyncio.wait_for(loop.run_in_executor(pool, mikrotik_job), timeout=10)
+        except asyncio.TimeoutError:
+            logger.error(f"MikroTik API timeout for {router_id}")
+            return False
 
 
 # --- МАРШРУТЫ ---
