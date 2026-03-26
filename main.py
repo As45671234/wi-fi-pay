@@ -197,6 +197,20 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
         user_name = f"T-{mac.replace(':', '')}"
         user_pass = f"p{int(time.time()) % 1000000}"
 
+        # Do not downgrade an already granted TRIAL/PAID session when user opens payment page.
+        if mode == 'PAY_WINDOW':
+            existing_bindings = binding.call('print', queries={'mac-address': mac})
+            for b in existing_bindings:
+                comment = (b.get('comment') or '')
+                if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                    return True
+
+            existing_users = user_res.call('print', queries={'name': user_name})
+            for u in existing_users:
+                comment = (u.get('comment') or '')
+                if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                    return True
+
         for b in binding.call('print', queries={'mac-address': mac}):
             binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
         for a in active.call('print', queries={'mac-address': mac}):
