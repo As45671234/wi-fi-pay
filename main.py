@@ -90,27 +90,27 @@ def get_db_connection():
 
 
 def check_trial_used_last_24h(mac: str, device_id: str) -> bool:
-        """Проверяет, использовался ли пробный период за последние 24 часа по MAC или device_id."""
-    conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id
-            FROM orders
-            WHERE status = 'TRIAL'
+        """Return True when trial was used by MAC or device_id in last 24 hours."""
+        conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
+        try:
+                cursor = conn.cursor()
+                cursor.execute(
+                        """
+                        SELECT id
+                        FROM orders
+                        WHERE status = 'TRIAL'
                             AND created_at >= datetime('now', '-24 hours')
-              AND (
-                mac_address = ?
-                OR (device_id IS NOT NULL AND device_id != '' AND device_id = ?)
-              )
-            LIMIT 1
-            """,
+                            AND (
+                                mac_address = ?
+                                OR (device_id IS NOT NULL AND device_id != '' AND device_id = ?)
+                            )
+                        LIMIT 1
+                        """,
                         (mac, device_id),
-        )
-        return cursor.fetchone() is not None
-    finally:
-        conn.close()
+                )
+                return cursor.fetchone() is not None
+        finally:
+                conn.close()
 
 
 def get_or_create_device_id(request: Request) -> tuple[str, bool]:
