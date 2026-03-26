@@ -19,5 +19,12 @@
     "user": "admin",
     "pass": "kaspiwifiadmin2026",
     "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
+  },
+  {
+    "id": "astana_04",
+    "ip": "10.0.0.5",
+    "user": "admin",
+    "pass": "kaspiwifiadmin2026",
+    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
   }
 ]
