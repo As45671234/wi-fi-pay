@@ -167,7 +167,7 @@ init_db()
 # --- ЯДРО: MIKROTIK API (СТАТУС A H) ---
 
 
-def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
+def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, seconds: int | None = None):
     config = ROUTERS_CONFIG.get(router_id)
     if not config:
         logger.error(f"❌ Неизвестный router_id: {router_id}")
@@ -249,7 +249,8 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str):
             )
         except Exception:
             mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
-        mt_expiry = mt_now + timedelta(minutes=minutes)
+        duration_seconds = max(1, int(seconds if seconds is not None else round(minutes * 60)))
+        mt_expiry = mt_now + timedelta(seconds=duration_seconds)
         mt_date = mt_expiry.strftime("%b/%d/%Y").lower()
         mt_time = mt_expiry.strftime("%H:%M:%S")
         task_name = f"del_{mac.replace(':', '')}"
@@ -380,7 +381,7 @@ async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
         return JSONResponse({"error": "Некорректный MAC-адрес"}, status_code=400)
     
     # iPhone flow: short bridge window to open browser, then real 3-min PAY_WINDOW is granted on pay click.
-    if not set_mikrotik_ah_access(mac, router_id, minutes=(10 / 60), mode="PAY_WINDOW"):
+    if not set_mikrotik_ah_access(mac, router_id, minutes=1, mode="PAY_WINDOW", seconds=10):
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
 
     payment_order_id = str(int(time.time() * 1000))
