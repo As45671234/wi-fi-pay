@@ -1,0 +1,189 @@
+ИНСТРУКЦИЯ: НАСТРОЙКА НОВОГО MIKROTIK ДЛЯ WIFI-PAY
+Версия: 2026-03-26
+
+============================================================
+1) ЦЕЛЬ
+============================================================
+Настроить каждый новый роутер для captive portal WiFi-Pay:
+- клиенты видят портал и тарифы,
+- trial/оплата работают,
+- backend на VPS управляет доступом через MikroTik API по WireGuard.
+
+Текущая схема router_id:
+- уже настроены: astana_01, astana_02
+- следующие: astana_03, astana_04, astana_05, astana_06
+
+Текущая WireGuard сеть:
+- VPS: 10.0.0.1/24
+- роутеры: 10.0.0.X/24
+
+Распределение IP для следующих 4 роутеров:
+- astana_03 -> 10.0.0.4
+- astana_04 -> 10.0.0.5
+- astana_05 -> 10.0.0.6
+- astana_06 -> 10.0.0.7
+
+============================================================
+2) БАЗОВАЯ НАСТРОЙКА РОУТЕРА (WINBOX)
+============================================================
+2.1 WAN/LAN
+- WAN (обычно ether1): получить интернет (DHCP или ваш способ)
+- LAN: bridge с адресом 192.168.88.1/24
+
+2.2 DHCP
+IP -> DHCP Server:
+- сеть 192.168.88.0/24
+- DNS Servers в Network: 192.168.88.1
+
+2.3 Wi-Fi
+- SSID: Wifi-Pay-0X (например Wifi-Pay-03)
+- открытая сеть (без пароля), если это ваш текущий сценарий
+
+============================================================
+3) HOTSPOT
+============================================================
+3.1 Запуск мастера
+IP -> Hotspot -> Hotspot Setup на интерфейсе bridge
+
+3.2 Server Profile (hsprof1)
+IP -> Hotspot -> Server Profiles -> hsprof1
+Вкладка General:
+- DNS Name: hotspot.wifi-pay.local
+- HTML Directory: hotspot
+
+Вкладка Login:
+- включено только HTTP CHAP
+- Cookie: выключено
+- MAC Cookie: выключено
+
+============================================================
+4) ВРЕМЯ/NTP (ОБЯЗАТЕЛЬНО)
+============================================================
+System -> NTP Client:
+- Enabled: yes
+- Primary: 216.239.35.0
+- Secondary: 216.239.35.4
+- Дождаться Status: synchronized
+
+System -> Clock:
+- Time Zone Name: Asia/Almaty
+
+============================================================
+5) WALLED GARDEN
+============================================================
+Добавить только allow-правила для:
+- wifi-pay.kz
+- www.wifi-pay.kz
+- api.freedompay.kz
+
+ВАЖНО: НЕ добавлять captive-check домены, чтобы iPhone корректно показывал портал:
+- captive.apple.com
+- www.apple.com
+- connectivitycheck.gstatic.com
+- clients3.google.com
+- connect.rom.miui.com
+
+============================================================
+6) WIREGUARD
+============================================================
+6.1 На роутере
+WireGuard -> New interface wireguard1
+Назначить IP: 10.0.0.X/24 на wireguard1
+
+Добавить Peer VPS:
+- Public Key VPS: XNSGO48vf8JDFE6gPw+4HpG+DerPDBpwDUCMw+wlnCA=
+- Endpoint: 46.247.42.123
+- Endpoint Port: 443
+- Allowed Address: 10.0.0.0/24
+- Persistent Keepalive: 25
+
+6.2 На VPS
+В /etc/wireguard/wg0.conf добавить peer нового роутера:
+[Peer]
+PublicKey = <public_key_роутера>
+AllowedIPs = 10.0.0.X/32
+
+Перезапустить WG:
+sudo systemctl restart wg-quick@wg0
+
+Проверка:
+ping -c 3 10.0.0.X
+
+============================================================
+7) ДОСТУП BACKEND К API РОУТЕРА (КРИТИЧНО)
+============================================================
+На роутере (MikroTik Terminal):
+
+0) Создать API user (если нет):
+/user add name=admin password=kaspiwifiadmin2026 group=full
+
+1) Включить API только для VPS WG IP:
+/ip service set api disabled=no port=8728 address=10.0.0.1/32
+
+2) Разрешить вход в firewall:
+/ip firewall filter add chain=input action=accept protocol=tcp src-address=10.0.0.1 dst-port=8728 in-interface=wireguard1 comment="allow_api_from_vps"
+
+3) Убедиться, что allow-правило стоит выше общего drop not from LAN.
+
+Проверка с VPS:
+nc -vz -w3 10.0.0.X 8728
+Ожидается: succeeded/open
+
+============================================================
+8) BACKEND (VPS)
+============================================================
+В main.py добавить роутер в ROUTERS_CONFIG:
+- router_id: astana_0X
+- ip: 10.0.0.X
+- user/pass: как на роутере
+
+Деплой:
+cd ~/wi-fi-pay
+git pull
+sudo systemctl restart wifi-pay
+sudo systemctl status wifi-pay --no-pager
+
+============================================================
+9) ПРОВЕРКА РОУТЕРА ПОСЛЕ НАСТРОЙКИ
+============================================================
+1. Подключиться к Wi-Fi точки
+2. Убедиться, что открывается портал/тарифы
+3. Проверить trial 15 минут
+4. Проверить оплату 200 тг
+5. Проверить клиента на VPS:
+ROUTER_IPS=10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7 ./list_clients.sh
+
+============================================================
+10) ТИПОВЫЕ ПРОБЛЕМЫ И РЕШЕНИЯ
+============================================================
+Проблема: "Router не ответил"
+- проверить nc -vz 10.0.0.X 8728
+- проверить /ip service api и firewall input rule
+
+Проблема: "No route to host"
+- проверить WG peer на VPS и роутере
+- проверить ping до 10.0.0.X
+
+Проблема: iPhone popup не появляется
+- убрать captive-check домены из Walled Garden
+- открыть вручную http://neverssl.com
+
+Проблема: list_clients.sh падал на одном роутере
+- использовать актуальную версию скрипта (устойчива к недоступным роутерам)
+
+============================================================
+11) ЧЕКЛИСТ ДЛЯ КАЖДОГО ИЗ 4 ОСТАВШИХСЯ РОУТЕРОВ
+============================================================
+[ ] Wi-Fi SSID задан (Wifi-Pay-0X)
+[ ] Hotspot поднят на bridge
+[ ] hsprof1: DNS Name=hotspot.wifi-pay.local, HTTP CHAP only
+[ ] Walled Garden: только wifi-pay.kz, www.wifi-pay.kz, api.freedompay.kz
+[ ] NTP synchronized, timezone Asia/Almaty
+[ ] WireGuard IP 10.0.0.X/24 на wireguard1
+[ ] Peer добавлен на роутере и VPS
+[ ] API 8728 открыт только для 10.0.0.1
+[ ] nc -vz -w3 10.0.0.X 8728 -> succeeded
+[ ] router_id добавлен в main.py
+[ ] Trial и оплата проверены
+
+Конец документа.

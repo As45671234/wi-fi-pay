@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>
+    var mac = '$(mac)';
+    var target = 'https://wifi-pay.kz/?mac=' + encodeURIComponent(mac) + '&router_id=astana_02';
+    window.location.replace(target);
+  </script>
+</head>
+<body>
+  Переход... <a id="go" href="#">Открыть</a>
+  <script>
+    document.getElementById('go').href =
+      'https://wifi-pay.kz/?mac=' + encodeURIComponent('$(mac)') + '&router_id=astana_02';
+  </script>
+</body>
+</html>
