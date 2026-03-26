@@ -27,36 +27,19 @@ logger = logging.getLogger("WiFiGateway")
 
 app = FastAPI(title="Wi-Fi Gateway Final")
 
-# Гарантируем, что все ответы JSON идут с utf-8
 def utf8_json_response(content, status_code=200):
     return JSONResponse(content, status_code=status_code, headers={"Content-Type": "application/json; charset=utf-8"})
 
-ROUTERS_CONFIG = {
-    "astana_01": {
-        "ip": "10.0.0.2",
-        "user": "admin",
-        "pass": "kaspiwifiadmin2026",
-        "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
-    },
-    "astana_02": {
-        "ip": "10.0.0.3",
-        "user": "admin",
-        "pass": "kaspiwifiadmin2026",
-        "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
-    },
-    "astana_03": {
-        "ip": "10.0.0.4",
-        "user": "admin",
-        "pass": "kaspiwifiadmin2026",
-        "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
-    },
-    "astana_04": {
-        "ip": "10.0.0.5",
-        "user": "admin",
-        "pass": "kaspiwifiadmin2026",
-        "portal_probe_url": "http://captive.apple.com/hotspot-detect.html",
-    }
-}
+# --- ЗАГРУЗКА КОНФИГА РОУТЕРОВ ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROUTERS_CONFIG_PATH = os.path.join(BASE_DIR, "routers_config.json")
+
+if os.path.exists(ROUTERS_CONFIG_PATH):
+    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
+        routers_list = json.load(f)
+    ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
+else:
+    ROUTERS_CONFIG = {}
 
 MERCHANT_ID = "581983"
 SECRET_KEY = "PMwioQEEEOFbDBAu"
@@ -67,12 +50,10 @@ TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
-# --- БАЗА ДАННЫХ И КОНФИГ ---
-
+# --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     conn.execute('''
@@ -97,15 +78,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-# ЧИТАЕМ JSON ФАЙЛ (ИСпРАВЛЕНО!)
-ROUTERS_CONFIG_PATH = os.path.join(BASE_DIR, "routers_config.json")
-if os.path.exists(ROUTERS_CONFIG_PATH):
-    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
-        routers_list = json.load(f)
-    ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
-
 def get_db_connection():
-    """Context manager для безопасной работы с БД"""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
         yield conn
@@ -113,14 +86,12 @@ def get_db_connection():
         conn.close()
 
 def get_or_create_device_id(request: Request):
-    """Генерирует ID устройства для куки"""
     device_id = request.cookies.get("wf_device_id")
     if device_id:
         return device_id, False
     return secrets.token_hex(16), True
 
 def check_trial_used_last_24h(mac: str, device_id: str) -> bool:
-    """Return True when trial was used by MAC or device_id in last 24 hours."""
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
         cursor = conn.cursor()
@@ -143,7 +114,6 @@ def get_client_ip(request: Request) -> str:
     client = request.client
     return (client.host if client else "unknown") or "unknown"
 
-
 def is_trial_rate_limited(request: Request) -> bool:
     ip = get_client_ip(request)
     now = int(time.time())
@@ -158,11 +128,9 @@ def is_trial_rate_limited(request: Request) -> bool:
     TRIAL_RATE_BUCKET[ip] = recent
     return False
 
-
 def make_trial_signature(mac: str, router_id: str, trial_ts: str) -> str:
     payload = f"{mac}|{router_id}|{trial_ts}"
     return hmac.new(SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
-
 
 def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig: str) -> bool:
     if not trial_ts or not re.fullmatch(r"\d{10}", trial_ts):
@@ -176,9 +144,7 @@ def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig:
     expected = make_trial_signature(mac, router_id, trial_ts)
     return hmac.compare_digest(expected, trial_sig.lower())
 
-
 init_db()
-
 
 # --- ЯДРО: MIKROTIK API (СТАТУС A H) ---
 
@@ -267,30 +233,33 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 if access_mode != "ACTIVE":
                     binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
 
+            # ИСПРАВЛЕНИЕ: Берем дату с MikroTik и переводим в формат с большой буквы (Mar, не mar), чтобы Python не падал
             try:
                 clock_info = api.get_resource('/system/clock').call('print')[0]
-                mt_now = datetime.strptime(
-                    f"{clock_info.get('date', '')} {clock_info.get('time', '')}",
-                    "%b/%d/%Y %H:%M:%S"
-                )
-            except Exception:
+                date_str = clock_info.get('date', '').title() # Обязательно Title (Mar/26/2026)
+                time_str = clock_info.get('time', '')
+                mt_now = datetime.strptime(f"{date_str} {time_str}", "%b/%d/%Y %H:%M:%S")
+            except Exception as e:
+                logger.error(f"Clock parse error: {e}")
                 mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
+                
             duration_seconds = max(1, int(seconds if seconds is not None else round(minutes * 60)))
             mt_expiry = mt_now + timedelta(seconds=duration_seconds)
-            mt_date = mt_expiry.strftime("%b/%d/%Y").lower()
+            mt_date = mt_expiry.strftime("%b/%d/%Y").lower() # Микротик понимает нижний регистр
             mt_time = mt_expiry.strftime("%H:%M:%S")
             task_name = f"del_{mac.replace(':', '')}"
 
             for t in sched.call('print', queries={'name': task_name}):
                 sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
 
+            # ИСПРАВЛЕНИЕ СИНТАКСИСА MIKROTIK (ДОБАВЛЕНЫ ПРОБЕЛЫ ПЕРЕД [find])
             on_event = (
-                f'/ip hotspot active remove[find mac-address="{mac}"]; '
-                f'/ip hotspot cookie remove[find user="{user_name}"]; '
+                f'/ip hotspot active remove [find mac-address="{mac}"]; '
+                f'/ip hotspot cookie remove [find user="{user_name}"]; '
                 f'/ip hotspot host remove [find mac-address="{mac}"]; '
-                f'/ip hotspot ip-binding remove [find mac-address="{mac}"]; '
-                f'/ip hotspot user remove [find name="{user_name}"]; '
-                f'/system scheduler remove[find name="{task_name}"];'
+                f'/ip hotspot ip-binding remove[find mac-address="{mac}"]; '
+                f'/ip hotspot user remove[find name="{user_name}"]; '
+                f'/system scheduler remove [find name="{task_name}"];'
             )
             sched.call('add', arguments={
                 'name': task_name,
@@ -301,7 +270,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 'comment': f"AUTOCLEAR_{mode}_{mac}",
             })
 
-            if mode in ['PAID', 'PAY_WINDOW']:
+            if mode in['PAID', 'PAY_WINDOW']:
                 logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
             return True
         except Exception as e:
@@ -342,7 +311,6 @@ def decode_nested_url_value(value: str) -> str:
     return decoded
 
 def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str) -> str:
-    # 200₸ = безлимит на день (1440 min), etc.
     minutes = 1440
     success_url = (
         f"https://wifi-pay.kz/success"
@@ -391,19 +359,22 @@ async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
 async def payment_methods_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("payment_methods.html", {"request": request, "mac": mac, "router_id": router_id})
 
+
 @app.get("/offer", response_class=HTMLResponse)
 @app.get("/offer.html", response_class=HTMLResponse)
 async def offer_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("offer.html", {"request": request, "mac": mac, "router_id": router_id})
+
 
 @app.get("/privacy", response_class=HTMLResponse)
 @app.get("/privacy.html", response_class=HTMLResponse)
 async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("privacy.html", {"request": request, "mac": mac, "router_id": router_id})
 
+
 @app.get("/start_payment")
 async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01"):
-    if amount not in[200, 490, 990, 2490]:
+    if amount not in[100, 200, 490, 990, 2490]:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
@@ -431,6 +402,7 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     payment_url = build_payment_url(amount, mac, router_id, payment_order_id)
     return RedirectResponse(url=payment_url, status_code=302)
 
+
 @app.get("/activate_welcome")
 async def activate_welcome(request: Request, mac: str, router_id: str = "astana_01"):
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
@@ -445,7 +417,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_android = "android" in user_agent
-    is_ios = any(device in user_agent for device in ["iphone", "ipad", "ipod"])
+    is_ios = any(device in user_agent for device in["iphone", "ipad", "ipod"])
 
     if is_android:
         logger.info(f"[activate_welcome] Android detected, mac={mac}, только редирект на /tariffs, доступ не выдается")
@@ -476,6 +448,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
     return RedirectResponse(url=tariff_url, status_code=302)
 
+
 @app.post("/get_free_trial")
 async def get_free_trial(
     request: Request,
@@ -504,7 +477,15 @@ async def get_free_trial(
     if check_trial_used_last_24h(mac, device_id):
         blocked = utf8_json_response({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403)
         if is_new_device_id:
-            blocked.set_cookie(key="wf_device_id", value=device_id, max_age=60 * 60 * 24 * 365, httponly=True, secure=True, samesite="lax", path="/")
+            blocked.set_cookie(
+                key="wf_device_id",
+                value=device_id,
+                max_age=60 * 60 * 24 * 365,
+                httponly=True,
+                secure=True,
+                samesite="lax",
+                path="/",
+            )
         return blocked
 
     if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
@@ -522,8 +503,17 @@ async def get_free_trial(
 
     response = JSONResponse({"message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь."})
     if is_new_device_id:
-        response.set_cookie(key="wf_device_id", value=device_id, max_age=60 * 60 * 24 * 365, httponly=True, secure=True, samesite="lax", path="/")
+        response.set_cookie(
+            key="wf_device_id",
+            value=device_id,
+            max_age=60 * 60 * 24 * 365,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
     return response
+
 
 @app.post("/payment_result")
 async def payment_result(request: Request):
@@ -572,7 +562,6 @@ async def payment_result(request: Request):
                 payment_order_id = payment_order_id or (row[2] or '')
 
         router_id = router_id or 'astana_01'
-
         minutes = 1440
 
         if not mac or not set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID"):
@@ -626,7 +615,7 @@ async def success(
         "minutes": minutes,
         "amount": amount,
     })
-#fsddasfasdsfasfdm
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
