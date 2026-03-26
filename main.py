@@ -371,7 +371,7 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 
 
 @app.get("/start_payment")
-async def start_payment(amount: int, mac: str, router_id: str = "astana_01"):
+async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01"):
     """Активирует окно оплаты и редиректит на FreedomPay"""
     # Валидация
     if amount not in [200]:
@@ -414,7 +414,16 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
         tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
         return RedirectResponse(url=tariff_url, status_code=302)
 
-    if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    is_ios = any(device in user_agent for device in ["iphone", "ipad", "ipod"])
+
+    # iPhone payment window: 1 min 30 sec. Others keep current 3-minute behavior.
+    if is_ios:
+        granted = set_mikrotik_ah_access(mac, router_id, minutes=1, mode="PAY_WINDOW", seconds=90)
+    else:
+        granted = set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW")
+
+    if not granted:
         return JSONResponse({"error": "Ошибка активации доступа"}, status_code=500)
 
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
