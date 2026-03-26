@@ -20,7 +20,7 @@ import routeros_api
 
 # --- НАСТРОЙКИ ---
 logging.basicConfig(
-    level=logging.WARNING,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("WiFiGateway")
@@ -180,28 +180,54 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
             user_name = f"T-{mac.replace(':', '')}"
             user_pass = f"p{int(time.time()) % 1000000}"
 
+            # Если уже есть PAID или TRIAL - не тронуть, вернуть успех
             if mode == 'PAY_WINDOW':
                 existing_bindings = binding.call('print', queries={'mac-address': mac})
                 for b in existing_bindings:
                     comment = (b.get('comment') or '')
                     if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                        logger.info(f"Защита: {comment} уже активен для {mac[:8]}***, не перетирать")
                         return True
 
                 existing_users = user_res.call('print', queries={'name': user_name})
                 for u in existing_users:
                     comment = (u.get('comment') or '')
                     if comment.startswith('TRIAL_') or comment.startswith('PAID_'):
+                        logger.info(f"Защита: {comment} юзер уже активен для {mac[:8]}***, не перетирать")
                         return True
 
+            # Удалять ТОЛЬКО PAY_WINDOW или старые сессии (не TRIAL/PAID если не нужно пересоздавать)
             for b in binding.call('print', queries={'mac-address': mac}):
-                binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
+                comment = (b.get('comment') or '')
+                # При PAY_WINDOW - удалять только PAY_WINDOW, не трогать PAID/TRIAL
+                if mode == 'PAY_WINDOW' and (comment.startswith('PAID_') or comment.startswith('TRIAL_')):
+                    logger.info(f"PAY_WINDOW: защита {comment} - не удаляем")
+                    continue
+                try:
+                    binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
+                    logger.debug(f"Удален биндинг {mac}: {comment}")
+                except Exception as e:
+                    logger.warning(f"Ошибка при удалении биндинга {mac}: {str(e)[:100]}")
+
             for a in active.call('print', queries={'mac-address': mac}):
-                active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
+                try:
+                    active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
+                except Exception as e:
+                    logger.warning(f"Ошибка при удалении active {mac}: {str(e)[:100]}")
+
             for u in user_res.call('print', queries={'name': user_name}):
-                user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
+                try:
+                    user_res.call('remove', arguments={'.id': u.get('id') or u.get('.id')})
+                except Exception as e:
+                    logger.warning(f"Ошибка при удалении юзера {user_name}: {str(e)[:100]}")
 
             if mode in ('PAY_WINDOW', 'TRIAL'):
-                binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+                try:
+                    binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+                    logger.info(f"✓ Биндинг {mode} добавлен для {mac[:8]}***")
+                except Exception as e:
+                    logger.error(f"❌ ОШИБКА добавления биндинга {mode} для {mac}: {str(e)[:150]}")
+                    raise
             else:
                 user_res.call('add', arguments={
                     'name': user_name,
@@ -231,7 +257,11 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                     time.sleep(0.35)
 
                 if access_mode != "ACTIVE":
-                    binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+                    try:
+                        binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
+                        logger.info(f"Fallback: биндинг BYPASS добавлен для {mac[:8]}***")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка fallback-биндинга для {mac}: {str(e)[:150]}")
 
             # ИСПРАВЛЕНИЕ: Берем дату с MikroTik и переводим в формат с большой буквы (Mar, не mar), чтобы Python не падал
             try:
@@ -249,26 +279,38 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
             mt_time = mt_expiry.strftime("%H:%M:%S")
             task_name = f"del_{mac.replace(':', '')}"
 
-            for t in sched.call('print', queries={'name': task_name}):
-                sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
-
-            # ИСПРАВЛЕНИЕ СИНТАКСИСА MIKROTIK (ДОБАВЛЕНЫ ПРОБЕЛЫ ПЕРЕД [find])
+            # ИСПРАВЛЕНИЕ СИНТАКСИСА MIKROTIK (ПРОБЕЛЫ ПЕРЕД [find] - ВАЖНО!)
+            # Генерируем on-event скрипт для автоочистки через N секунд
             on_event = (
-                f':do {{ /ip hotspot active remove[find mac-address="{mac}"] }} on-error={{}}; '
-                f':do {{ /ip hotspot cookie remove[find mac-address="{mac}"] }} on-error={{}}; '
+                f':do {{ /ip hotspot active remove [find mac-address="{mac}"] }} on-error={{}}; '
+                f':do {{ /ip hotspot cookie remove [find mac-address="{mac}"] }} on-error={{}}; '
                 f':do {{ /ip hotspot host remove [find mac-address="{mac}"] }} on-error={{}}; '
                 f':do {{ /ip hotspot ip-binding remove [find mac-address="{mac}"] }} on-error={{}}; '
                 f':do {{ /ip hotspot user remove [find name="{user_name}"] }} on-error={{}}; '
                 f':do {{ /system scheduler remove [find name="{task_name}"] }} on-error={{}}; '
             )
-            sched.call('add', arguments={
-                'name': task_name,
-                'start-date': mt_date,
-                'start-time': mt_time,
-                'interval': "00:00:00",
-                'on-event': on_event,
-                'comment': f"AUTOCLEAR_{mode}_{mac}",
-            })
+
+            for t in sched.call('print', queries={'name': task_name}):
+                try:
+                    sched.call('remove', arguments={'.id': t.get('id') or t.get('.id')})
+                    logger.debug(f"Старый scheduler {task_name} удален")
+                except Exception as e:
+                    logger.warning(f"Ошибка удаления старого scheduler {task_name}: {str(e)[:100]}")
+
+            # Создание scheduler для автоочистки
+            try:
+                sched.call('add', arguments={
+                    'name': task_name,
+                    'start-date': mt_date,
+                    'start-time': mt_time,
+                    'interval': "00:00:00",
+                    'on-event': on_event,
+                    'comment': f"AUTOCLEAR_{mode}_{mac}",
+                })
+                logger.info(f"✓ Scheduler {task_name} установлен на {mt_date} {mt_time} для очистки {mode} через {duration_seconds}с")
+            except Exception as e:
+                logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА при создании scheduler {task_name}: {str(e)[:150]}")
+                raise
 
             if mode in['PAID', 'PAY_WINDOW']:
                 logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
@@ -384,10 +426,12 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
         logger.error(f"[start_payment] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    logger.info(f"[start_payment] set_mikrotik_ah_access mac={mac}, router_id={router_id}, user-agent={request.headers.get('user-agent')}")
+    logger.info(f"[start_payment] Активирую PAY_WINDOW на 3 мин для {mac[:8]}*** на {router_id}")
     if not set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW"):
+        logger.error(f"[start_payment] ❌ ОШИБКА: PAY_WINDOW не активирован для {mac[:8]}*** на {router_id}")
         return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
 
+    logger.info(f"[start_payment] ✓ PAY_WINDOW активирован, инициирую платеж на {amount} ₸")
     payment_order_id = str(int(time.time() * 1000))
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
     try:
@@ -413,26 +457,28 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
         logger.error(f"[activate_welcome] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    logger.info(f"[activate_welcome] mac={mac}, router_id={router_id}, user-agent={request.headers.get('user-agent')}")
+    logger.info(f"[activate_welcome] User-Agent: {request.headers.get('user-agent')}, MAC: {mac[:8]}***")
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_android = "android" in user_agent
     is_ios = any(device in user_agent for device in["iphone", "ipad", "ipod"])
 
     if is_android:
-        logger.info(f"[activate_welcome] Android detected, mac={mac}, только редирект на /tariffs, доступ не выдается")
+        logger.info(f"[activate_welcome] 🤖 Android → редирект на /tariffs БЕЗ доступа (captive portal закроется сразу)")
         tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
         return RedirectResponse(url=tariff_url, status_code=302)
 
     if is_ios:
+        logger.info(f"[activate_welcome] 🍎 iOS → активирую PAY_WINDOW на 90 секунд")
         granted = set_mikrotik_ah_access(mac, router_id, minutes=1, mode="PAY_WINDOW", seconds=90)
-        logger.info(f"[activate_welcome] iOS detected, mac={mac}, выдан доступ на 90 секунд: {granted}")
+        logger.info(f"[activate_welcome] iOS результат: {'✓ успех' if granted else '❌ ошибка'}")
     else:
+        logger.info(f"[activate_welcome] 💻 Другое устройство → активирую PAY_WINDOW на 3 минуты")
         granted = set_mikrotik_ah_access(mac, router_id, minutes=3, mode="PAY_WINDOW")
-        logger.info(f"[activate_welcome] Other device, mac={mac}, выдан доступ на 3 минуты: {granted}")
+        logger.info(f"[activate_welcome] Результат: {'✓ успех' if granted else '❌ ошибка'}")
 
     if not granted:
-        logger.error(f"[activate_welcome] Ошибка активации доступа для mac={mac}, router_id={router_id}")
+        logger.error(f"[activate_welcome] ❌ ОШИБКА: PAY_WINDOW не активирован для {mac[:8]}*** на {router_id}")
         return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
 
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -464,17 +510,20 @@ async def get_free_trial(
         logger.error(f"[get_free_trial] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    logger.info(f"[get_free_trial] set_mikrotik_ah_access mac={mac}, router_id={router_id}, user-agent={request.headers.get('user-agent')}")
+    logger.info(f"[get_free_trial] Запрос TRIAL для {mac[:8]}*** на {router_id}")
 
     if is_trial_rate_limited(request):
+        logger.warning(f"[get_free_trial] ⚠️ RATE LIMIT для IP {get_client_ip(request)}")
         return utf8_json_response({"error": "Слишком много попыток. Подождите 10 минут и повторите."}, status_code=429)
 
     if not is_valid_trial_signature(mac, router_id, trial_ts, trial_sig):
+        logger.warning(f"[get_free_trial] ❌ Невалидная подпись для {mac[:8]}***")
         return utf8_json_response({"error": "Сессия истекла. Обновите страницу и попробуйте снова."}, status_code=400)
 
     device_id, is_new_device_id = get_or_create_device_id(request)
 
     if check_trial_used_last_24h(mac, device_id):
+        logger.info(f"[get_free_trial] Trial уже использован за 24ч для {mac[:8]}*** (device_id: {device_id[:8]}***)")
         blocked = utf8_json_response({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403)
         if is_new_device_id:
             blocked.set_cookie(
@@ -488,7 +537,9 @@ async def get_free_trial(
             )
         return blocked
 
+    logger.info(f"[get_free_trial] ✓ Все проверки пройдены, активирую TRIAL на 15 минут для {mac[:8]}***")
     if not set_mikrotik_ah_access(mac, router_id, minutes=15, mode="TRIAL"):
+        logger.error(f"[get_free_trial] ❌ Ошибка активации TRIAL для {mac[:8]}*** на {router_id}")
         return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
     
     conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -521,12 +572,14 @@ async def payment_result(request: Request):
         form_data = await request.form()
         params = dict(form_data)
 
+        logger.info(f"[payment_result] Callback от FreedomPay: order_id={params.get('pg_order_id')}, amount={params.get('pg_amount')} ₸")
+
         if params.get('pg_sig') != get_signature("payment_result", params, SECRET_KEY):
-            logger.warning("Invalid signature in payment callback")
+            logger.error(f"[payment_result] ❌ НЕВАЛИДНАЯ ПОДПИСЬ от FreedomPay")
             return Response(content="Invalid signature", status_code=400)
         
         if params.get('pg_result') != '1':
-            logger.info(f"Payment failed: {params.get('pg_result')}")
+            logger.info(f"[payment_result] ⚠️ Платеж не прошел (pg_result={params.get('pg_result')})")
             return Response(content="Payment not successful", status_code=400)
 
         payment_order_id = (params.get('pg_order_id') or '').strip()
@@ -534,11 +587,14 @@ async def payment_result(request: Request):
         router_id = params.get('pg_param2')
         amount = int(float(params.get('pg_amount', 0)))
 
+        logger.info(f"[payment_result] ✓ Платеж успешен: {amount} ₸, MAC: {mac}, router: {router_id}")
+
         if not mac:
             description = params.get('pg_description', '')
             mac_match = re.search(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})", description)
             if mac_match:
                 mac = mac_match.group(1)
+                logger.info(f"[payment_result] MAC восстановлен из описания: {mac[:8]}***")
 
         if not mac or not router_id:
             conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -564,8 +620,9 @@ async def payment_result(request: Request):
         router_id = router_id or 'astana_01'
         minutes = 1440
 
+        logger.info(f"[payment_result] Активирую PAID на {minutes} минут для {mac[:8]}*** на {router_id}")
         if not mac or not set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID"):
-            logger.error(f"Failed to activate paid access for {mac}")
+            logger.error(f"[payment_result] ❌ ОШИБКА: Не удалось активировать PAID для {mac[:8]}*** на {router_id}")
             return Response(content="Activation failed", status_code=500)
 
         conn = sqlite3.connect(os.path.join(BASE_DIR, 'gateway.db'))
@@ -588,14 +645,14 @@ async def payment_result(request: Request):
                     (mac, amount, router_id, payment_order_id),
                 )
             conn.commit()
-            logger.info(f"Payment processed: {amount}₸ for {mac[:8]}*** ({minutes}min)")
+            logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ обработано для {mac[:8]}*** на 24 часа ({minutes} минут)")
         finally:
             conn.close()
 
         return Response(content="OK", status_code=200)
     
     except Exception as e:
-        logger.error(f"Payment processing error: {str(e)[:200]}")
+        logger.error(f"[payment_result] ❌ ОШИБКА обработки платежа: {str(e)[:200]}")
         return Response(content="Internal error", status_code=500)
 
 @app.get("/success", response_class=HTMLResponse)
