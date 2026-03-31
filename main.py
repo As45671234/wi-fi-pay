@@ -521,6 +521,8 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
 async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     trial_ts = str(int(time.time()))
     trial_sig = make_trial_signature(mac, router_id, trial_ts)
+    device_id, _ = get_or_create_device_id(request)
+    trial_used = check_trial_used_last_24h(mac, device_id)
     response = templates.TemplateResponse(
         "index.html",
         {
@@ -529,6 +531,7 @@ async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
             "router_id": router_id,
             "trial_ts": trial_ts,
             "trial_sig": trial_sig,
+            "trial_used": "true" if trial_used else "false",
         },
     )
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"

@@ -114,6 +114,7 @@
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
     const trialTs = "{{ trial_ts }}";
     const trialSig = "{{ trial_sig }}";
+    const trialUsed = {{ trial_used }};
     const userAgent = navigator.userAgent || '';
     const isAndroid = /android/i.test(userAgent);
     const isIOS = /iPad|iPhone|iPod/i.test(userAgent);
@@ -134,8 +135,17 @@
         trialNotice.style.display = 'none';
 
         if (amount === 0) {
-            trialBtn.style.display = 'block';
-            payBtn.style.display = 'none';
+            if (trialUsed) {
+                trialBtn.style.display = 'none';
+                payBtn.style.display = 'none';
+                notice.className = 'trial-notice warn';
+                document.getElementById('trial-notice-title').textContent = 'Бесплатный доступ уже использован';
+                document.getElementById('trial-notice-text').textContent = 'Повторно можно через 24 часа. Выберите платный тариф.';
+                trialNotice.style.display = 'block';
+            } else {
+                trialBtn.style.display = 'block';
+                payBtn.style.display = 'none';
+            }
         } else {
             trialBtn.style.display = 'none';
             payBtn.style.display = 'block';
