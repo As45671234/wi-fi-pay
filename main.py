@@ -718,6 +718,15 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         conn.close()
 
     total_ms = (time.monotonic() - t_start) * 1000
+    user_agent = (request.headers.get("user-agent") or "")
+    is_android = bool(re.search(r"android", user_agent, re.IGNORECASE))
+
+    # Android: после появления интернета captive flow может оборвать цепочку 303->/tariffs.
+    # Поэтому отдаём тарифы сразу в этом же ответе.
+    if is_android:
+        logger.info(f"[prepare_and_tariffs] android direct HTML cid={cid}, total: {total_ms:.0f}ms для {mac[:8]}***")
+        return _build_tariffs_response(request, mac, router_id, cid)
+
     logger.info(f"[prepare_and_tariffs] redirect cid={cid} -> /tariffs, total: {total_ms:.0f}ms для {mac[:8]}***")
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
     return RedirectResponse(url=tariff_url, status_code=303)
