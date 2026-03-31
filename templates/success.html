@@ -90,7 +90,7 @@
 
     <p class="hint" id="hintText">Закройте эту вкладку и пользуйтесь интернетом. Когда время истечёт — откроется страница выбора тарифа.</p>
 
-    <div class="mac-id">ID: {{ mac }}</div>
+    <div class="mac-id">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
 </div>
 
 <div class="footer">
@@ -133,7 +133,7 @@ document.getElementById('tariffAmount').textContent = tariffAmount(AMOUNT);
 document.getElementById('deviceId').textContent     = formatDevice(MAC);
 
 // Expiry timestamp — persist so page refresh doesn't reset it
-const storageKey = `wf_expiry_${MAC}`;
+const storageKey = `wf_expiry_${ROUTER_ID}_${MAC}`;
 let expiryTs = parseInt(localStorage.getItem(storageKey) || '0', 10);
 
 // Only set a fresh expiry if it looks wrong (old or missing)
@@ -199,28 +199,37 @@ function tick() {
 
 tick();
 
-// Серверный поллинг каждые 30 сек — синхронизирует таймер с сервером.
-// Если сервер говорит "expired" раньше клиентского таймера — форсируем истечение.
-setInterval(function() {
+function syncFromServer() {
     if (expired) return;
     fetch('/session_status?mac=' + encodeURIComponent(MAC) + '&router_id=' + encodeURIComponent(ROUTER_ID))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.active && data.expires_in < 0) {
-                expiryTs = Date.now();  // форсируем tick
-            } else if (data.expires_in > 0) {
-                // Синхронизируем с сервером если расхождение > 30 сек
-                const clientRemaining = Math.floor((expiryTs - Date.now()) / 1000);
-                if (Math.abs(clientRemaining - data.expires_in) > 30) {
-                    expiryTs = Date.now() + data.expires_in * 1000;
+                expiryTs = Date.now();
+                return;
+            }
+            if (data.expires_in > 0) {
+                const serverExpiryTs = Date.now() + data.expires_in * 1000;
+                const driftMs = Math.abs(expiryTs - serverExpiryTs);
+                // На первом инициализационном sync и при большом дрейфе подравниваем таймер.
+                if (driftMs > 30000) {
+                    expiryTs = serverExpiryTs;
                     localStorage.setItem(storageKey, String(expiryTs));
                 }
             }
         })
         .catch(function() {
-            // Сеть пропала → сессия истекла, форсируем
-            expiryTs = Date.now();
+            // Временная ошибка сети: не форсируем истечение, держим локальный таймер.
         });
+}
+
+// Немедленная синхронизация при загрузке, чтобы убрать скачок "24ч -> 1мин".
+syncFromServer();
+
+// Серверный поллинг каждые 30 сек — синхронизирует таймер с сервером.
+// Если сервер говорит "expired" раньше клиентского таймера — форсируем истечение.
+setInterval(function() {
+    syncFromServer();
 }, 30000);
 </script>
 </body>

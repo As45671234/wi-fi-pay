@@ -568,8 +568,6 @@ async def session_status(mac: str, router_id: str = "astana_01"):
     if not row:
         return utf8_json_response({"active": False, "expires_in": -1})
     status, expires_at_str = row
-    if status == 'PAID':
-        return utf8_json_response({"active": True, "expires_in": 86400})
     if not expires_at_str:
         return utf8_json_response({"active": True, "expires_in": -1})
     try:
@@ -729,6 +727,7 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
     # Отдаем легкий bridge, который сразу переводит на /tariffs.
     if is_android:
         logger.info(f"[prepare_and_tariffs] android bridge cid={cid}, total: {total_ms:.0f}ms для {mac[:8]}***")
+        tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
         response = templates.TemplateResponse(
             "android_bridge.html",
             {
@@ -741,6 +740,7 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+        response.headers["Refresh"] = f"0; url={tariff_url}"
         return response
 
     logger.info(f"[prepare_and_tariffs] redirect cid={cid} -> /tariffs, total: {total_ms:.0f}ms для {mac[:8]}***")
