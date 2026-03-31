@@ -5,8 +5,23 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script>
     var mac = '$(mac)';
-    var target = 'https://wifi-pay.kz/?mac=' + encodeURIComponent(mac) + '&router_id=astana_04';
-    window.location.replace(target);
+    var targetPath = '/?mac=' + encodeURIComponent(mac) + '&router_id=astana_04';
+    var targetAbs = 'https://wifi-pay.kz' + targetPath;
+    var ua = navigator.userAgent || '';
+    var isAndroid = /android/i.test(ua);
+
+    if (isAndroid) {
+      // Android: принудительно открыть Chrome один раз на входе из captive portal.
+      var intentUrl = 'intent://wifi-pay.kz' + targetPath
+        + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='
+        + encodeURIComponent(targetAbs) + ';end';
+      window.location.replace(intentUrl);
+      setTimeout(function () {
+        window.location.replace(targetAbs);
+      }, 1500);
+    } else {
+      window.location.replace(targetAbs);
+    }
   </script>
 </head>
 <body>

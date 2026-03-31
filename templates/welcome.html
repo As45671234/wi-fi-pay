@@ -131,17 +131,13 @@
     logClient('page_loaded', 0, 'ua=' + userAgent.slice(0, 80));
 
     form.addEventListener('submit', function(event) {
-        // Android: мгновенный handoff в браузер БЕЗ загрузок и ожиданий.
+        // Android: браузер уже открыт на шаге login.html, здесь не делаем второй intent-handoff.
         if (isAndroid) {
             event.preventDefault();
-            var preparePath = '/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress)
+            var relPrepareUrl = '/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress)
                 + '&router_id=' + encodeURIComponent(routerId)
                 + '&cid=' + encodeURIComponent(cid);
-            var fallbackUrl = 'https://wifi-pay.kz' + preparePath;
-            var intentUrl = 'intent://wifi-pay.kz' + preparePath
-                + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='
-                + encodeURIComponent(fallbackUrl) + ';end';
-            window.location.replace(intentUrl);
+            window.location.assign(relPrepareUrl);
             return;
         }
 
