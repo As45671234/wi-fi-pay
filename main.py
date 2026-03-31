@@ -383,9 +383,10 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
             )
             api = connection.get_api()
 
-            # Быстрый путь для PAY_WINDOW: только биндинг, без scheduler/cleanup юзеров/active
+            # Быстрый путь для PAY_WINDOW: биндинг + scheduler, без cleanup юзеров/active
             if mode == 'PAY_WINDOW':
                 binding = api.get_resource('/ip/hotspot/ip-binding')
+                sched = api.get_resource('/system/scheduler')
                 for b in binding.call('print', queries={'mac-address': mac}):
                     comment = (b.get('comment') or '')
                     if comment.startswith('PAID_') or comment.startswith('TRIAL_'):
@@ -396,7 +397,9 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                     except Exception:
                         pass
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"PAY_WINDOW_{mac}"})
-                logger.info(f"✓ PAY_WINDOW биндинг добавлен для {mac[:8]}***")
+                user_name = f"T-{mac.replace(':', '')}"
+                _mikrotik_setup_scheduler(api, sched, mac, user_name, "PAY_WINDOW", seconds, minutes)
+                logger.info(f"✓ PAY_WINDOW биндинг + scheduler для {mac[:8]}***")
                 return True
 
             binding = api.get_resource('/ip/hotspot/ip-binding')
