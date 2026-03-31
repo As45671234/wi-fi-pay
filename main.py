@@ -375,6 +375,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
+            t0 = time.monotonic()
             connection = routeros_api.RouterOsApiPool(
                 config['ip'],
                 username=config['user'],
@@ -383,9 +384,11 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 plaintext_login=True,
             )
             api = connection.get_api()
+            logger.info(f"[MK] connect {router_id}: {(time.monotonic()-t0)*1000:.0f}ms (attempt {attempt})")
 
             # Быстрый путь для PAY_WINDOW: биндинг + scheduler, без cleanup юзеров/active
             if mode == 'PAY_WINDOW':
+                t1 = time.monotonic()
                 binding = api.get_resource('/ip/hotspot/ip-binding')
                 sched = api.get_resource('/system/scheduler')
                 for b in binding.call('print', queries={'mac-address': mac}):
@@ -397,10 +400,14 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                         binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
                     except Exception:
                         pass
+                logger.info(f"[MK] binding print+cleanup: {(time.monotonic()-t1)*1000:.0f}ms")
+                t2 = time.monotonic()
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"PAY_WINDOW_{mac}"})
+                logger.info(f"[MK] binding add: {(time.monotonic()-t2)*1000:.0f}ms")
                 user_name = f"T-{mac.replace(':', '')}"
+                t3 = time.monotonic()
                 _mikrotik_setup_scheduler(api, sched, mac, user_name, "PAY_WINDOW", seconds, minutes)
-                logger.info(f"✓ PAY_WINDOW биндинг + scheduler для {mac[:8]}***")
+                logger.info(f"[MK] scheduler: {(time.monotonic()-t3)*1000:.0f}ms, PAY_WINDOW total: {(time.monotonic()-t0)*1000:.0f}ms")
                 return True
 
             binding = api.get_resource('/ip/hotspot/ip-binding')
@@ -516,6 +523,7 @@ async def session_status(mac: str, router_id: str = "astana_01"):
 @app.post("/api/prepare_access")
 async def prepare_access(request: Request):
     """Создаёт PAY_WINDOW синхронно — welcome.html ждёт завершения через AJAX."""
+    t_start = time.monotonic()
     data = await request.json()
     mac = data.get("mac", "")
     router_id = data.get("router_id", "astana_01")
@@ -525,6 +533,7 @@ async def prepare_access(request: Request):
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"ok": False, "error": "Неизвестный роутер"}, status_code=400)
 
+    t_db = time.monotonic()
     expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
     conn = get_db()
     try:
@@ -535,9 +544,11 @@ async def prepare_access(request: Request):
         conn.commit()
     finally:
         conn.close()
+    logger.info(f"[prepare_access] DB INSERT: {(time.monotonic()-t_db)*1000:.0f}ms")
 
+    t_mk = time.monotonic()
     ok = await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW")
-    logger.info(f"[prepare_access] PAY_WINDOW {'✓' if ok else '✗'} для {mac[:8]}***")
+    logger.info(f"[prepare_access] MikroTik: {(time.monotonic()-t_mk)*1000:.0f}ms, total: {(time.monotonic()-t_start)*1000:.0f}ms, {'✓' if ok else '✗'} для {mac[:8]}***")
     return utf8_json_response({"ok": ok})
 
 

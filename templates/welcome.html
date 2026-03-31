@@ -111,6 +111,8 @@
     btn.addEventListener('click', function() {
         btn.disabled = true;
         overlay.classList.add('active');
+        var t0 = Date.now();
+        var loadMsg = document.querySelector('.loading-sub');
 
         // Создаём PAY_WINDOW синхронно — ждём пока MikroTik настроит доступ
         fetch('/api/prepare_access', {
@@ -118,12 +120,16 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({mac: macAddress, router_id: routerId})
         })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (loadMsg) loadMsg.textContent = 'Ответ сервера: ' + (Date.now()-t0) + 'мс';
+            return r.json();
+        })
         .then(function(data) {
+            console.log('prepare_access: ' + (Date.now()-t0) + 'ms');
             navigateToTariffs();
         })
         .catch(function() {
-            // Ошибка сети — всё равно переходим (оплата сама создаст доступ)
+            console.log('prepare_access FAIL: ' + (Date.now()-t0) + 'ms');
             navigateToTariffs();
         });
     });
