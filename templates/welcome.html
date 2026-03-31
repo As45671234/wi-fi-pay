@@ -150,8 +150,18 @@
             .then(function(response) { return response.json(); })
             .then(function(data) {
                 if (data && data.ok) {
-                    logClient('prepare_ok', Date.now() - t0, 'redirect_to_tariffs');
-                    window.location.replace('https://wifi-pay.kz/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId) + '&cid=' + encodeURIComponent(cid));
+                    logClient('prepare_ok', Date.now() - t0, 'nav_tariffs_same_origin');
+                    var relTariffUrl = '/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId) + '&cid=' + encodeURIComponent(cid);
+                    var absTariffUrl = 'https://wifi-pay.kz' + relTariffUrl;
+                    window.location.assign(relTariffUrl);
+
+                    // iOS captive иногда задерживает переход. Если через 3с мы всё ещё здесь — fallback.
+                    setTimeout(function() {
+                        if (document.visibilityState === 'visible') {
+                            logClient('nav_fallback_abs', Date.now() - t0, 'still_visible_after_3s');
+                            window.location.assign(absTariffUrl);
+                        }
+                    }, 3000);
                     return;
                 }
                 throw new Error((data && data.error) ? data.error : 'prepare_access failed');
