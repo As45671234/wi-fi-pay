@@ -381,6 +381,22 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
             )
             api = connection.get_api()
 
+            # Быстрый путь для PAY_WINDOW: только биндинг, без scheduler/cleanup юзеров/active
+            if mode == 'PAY_WINDOW':
+                binding = api.get_resource('/ip/hotspot/ip-binding')
+                for b in binding.call('print', queries={'mac-address': mac}):
+                    comment = (b.get('comment') or '')
+                    if comment.startswith('PAID_') or comment.startswith('TRIAL_'):
+                        logger.info(f"PAY_WINDOW: уже есть {comment} для {mac[:8]}***, пропускаем")
+                        return True
+                    try:
+                        binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
+                    except Exception:
+                        pass
+                binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"PAY_WINDOW_{mac}"})
+                logger.info(f"✓ PAY_WINDOW биндинг добавлен для {mac[:8]}***")
+                return True
+
             binding = api.get_resource('/ip/hotspot/ip-binding')
             active = api.get_resource('/ip/hotspot/active')
             user_res = api.get_resource('/ip/hotspot/user')
@@ -389,9 +405,6 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
 
             user_name = f"T-{mac.replace(':', '')}"
             user_pass = f"p{int(time.time()) % 1000000}"
-
-            if mode == 'PAY_WINDOW' and _mikrotik_check_existing_access(binding, user_res, user_name, mac):
-                return True
 
             _mikrotik_cleanup_old(binding, active, user_res, mac, user_name, mode)
             _mikrotik_create_access(binding, active, user_res, host_res, mac, user_name, user_pass, minutes, mode)
