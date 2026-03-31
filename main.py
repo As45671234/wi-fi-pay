@@ -523,6 +523,17 @@ async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
     trial_sig = make_trial_signature(mac, router_id, trial_ts)
     device_id, _ = get_or_create_device_id(request)
     trial_used = check_trial_used_last_24h(mac, device_id)
+
+    # iOS приходит через activate_welcome (PAY_WINDOW уже запущен).
+    # Android приходит напрямую — запускаем PAY_WINDOW фоново здесь.
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    is_android = "android" in user_agent
+    if is_android and router_id in ROUTERS_CONFIG and re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        asyncio.create_task(asyncio.to_thread(
+            set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"
+        ))
+        logger.info(f"[tariffs] Android: PAY_WINDOW запущен фоново для {mac[:8]}***")
+
     response = templates.TemplateResponse(
         "index.html",
         {
