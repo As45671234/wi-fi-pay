@@ -30,6 +30,13 @@
         .btn-bonus { font-size: 0.75rem; margin-top: 0.4rem; opacity: 0.9; font-weight: 500; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
+
+        #loading-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.93); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; gap: 1.2rem; }
+        #loading-overlay.active { display: flex; }
+        .spinner { width: 48px; height: 48px; border: 5px solid #e5e7eb; border-top-color: #1c75ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-msg { font-size: 1rem; font-weight: 600; color: #374151; }
+        .loading-sub { font-size: 0.8rem; color: #9ca3af; }
     </style>
 </head>
 <body>
@@ -72,6 +79,12 @@
         <div class="mac-id">ID: {{ mac }}</div>
     </div>
 
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-msg">Подключаемся к роутеру...</div>
+        <div class="loading-sub">Это займёт несколько секунд</div>
+    </div>
+
     <script>
     'use strict';
     
@@ -81,6 +94,8 @@
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
     const isAndroid = /android/i.test(navigator.userAgent || '');
     
+    const overlay = document.getElementById('loading-overlay');
+
     // Update link href if URL params exist
     if (macAddress && routerId) {
         const link = document.querySelector('.btn-start');
@@ -95,6 +110,14 @@
             }
         }
     }
+
+    document.querySelector('.btn-start').addEventListener('click', function() {
+        overlay.classList.add('active');
+    });
+
+    window.addEventListener('pageshow', function() {
+        overlay.classList.remove('active');
+    });
     </script>
 
 </body>

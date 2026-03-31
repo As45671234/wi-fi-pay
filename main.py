@@ -397,12 +397,14 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
             _mikrotik_create_access(binding, active, user_res, host_res, mac, user_name, user_pass, minutes, mode)
             _mikrotik_setup_scheduler(api, sched, mac, user_name, mode, seconds, minutes)
 
-            logger.info(f"[VERIFY] Проверяю что {mode} реально активирован...")
-            verify_result = verify_access_activated(api, mac, user_name, mode)
-            if verify_result["binding_exists"] or verify_result["user_exists"]:
-                logger.info(f"✅ ПОДТВЕРЖЕНО: {mode} активирован для {mac[:8]}*** ({'биндинг' if verify_result['binding_exists'] else 'юзер'})")
-            else:
-                logger.error(f"⚠️ ВНИМАНИЕ: {mode} МОЖЕТ НЕ АКТИВИРОВАН для {mac[:8]}*** (проверить на роутере вручную!)")
+            # Верификация только для PAID — для PAY_WINDOW/TRIAL лишние round-trip не нужны
+            if mode == 'PAID':
+                logger.info(f"[VERIFY] Проверяю что {mode} реально активирован...")
+                verify_result = verify_access_activated(api, mac, user_name, mode)
+                if verify_result["binding_exists"] or verify_result["user_exists"]:
+                    logger.info(f"✅ ПОДТВЕРЖЕНО: {mode} активирован для {mac[:8]}*** ({'биндинг' if verify_result['binding_exists'] else 'юзер'})")
+                else:
+                    logger.error(f"⚠️ ВНИМАНИЕ: {mode} МОЖЕТ НЕ АКТИВИРОВАН для {mac[:8]}*** (проверить на роутере вручную!)")
 
             if mode in ['PAID', 'PAY_WINDOW']:
                 logger.info(f"Access granted: {mode} {minutes}min for {mac[:8]}***")
