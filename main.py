@@ -53,6 +53,7 @@ TRIAL_TOKEN_TTL_SECONDS = 5 * 60
 TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
+# _PAY_WINDOW_TASKS больше не нужен — PAY_WINDOW создаётся синхронно через /api/prepare_access
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
@@ -512,6 +513,34 @@ async def session_status(mac: str, router_id: str = "astana_01"):
     except Exception:
         return utf8_json_response({"active": False, "expires_in": -1})
 
+@app.post("/api/prepare_access")
+async def prepare_access(request: Request):
+    """Создаёт PAY_WINDOW синхронно — welcome.html ждёт завершения через AJAX."""
+    data = await request.json()
+    mac = data.get("mac", "")
+    router_id = data.get("router_id", "astana_01")
+
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        return utf8_json_response({"ok": False, "error": "Некорректный MAC"}, status_code=400)
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"ok": False, "error": "Неизвестный роутер"}, status_code=400)
+
+    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at) VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
+            (mac, router_id, expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    ok = await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW")
+    logger.info(f"[prepare_access] PAY_WINDOW {'✓' if ok else '✗'} для {mac[:8]}***")
+    return utf8_json_response({"ok": ok})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id})
@@ -523,16 +552,6 @@ async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
     trial_sig = make_trial_signature(mac, router_id, trial_ts)
     device_id, _ = get_or_create_device_id(request)
     trial_used = check_trial_used_last_24h(mac, device_id)
-
-    # iOS приходит через activate_welcome (PAY_WINDOW уже запущен).
-    # Android приходит напрямую — запускаем PAY_WINDOW фоново здесь.
-    user_agent = (request.headers.get("user-agent") or "").lower()
-    is_android = "android" in user_agent
-    if is_android and router_id in ROUTERS_CONFIG and re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
-        asyncio.create_task(asyncio.to_thread(
-            set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"
-        ))
-        logger.info(f"[tariffs] Android: PAY_WINDOW запущен фоново для {mac[:8]}***")
 
     response = templates.TemplateResponse(
         "index.html",
@@ -724,9 +743,6 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
         logger.error(f"[start_payment] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    logger.info(f"[start_payment] Обновляю PAY_WINDOW фоново для {mac[:8]}*** на {router_id}")
-    asyncio.create_task(asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes=3, mode="PAY_WINDOW"))
-
     payment_order_id = str(int(time.time() * 1000))
     conn = get_db()
     try:
@@ -763,12 +779,8 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
     finally:
         conn.close()
 
-    # Запускаем PAY_WINDOW фоново — не ждём, редиректим сразу.
-    asyncio.create_task(asyncio.to_thread(
-        set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"
-    ))
-    logger.info(f"[activate_welcome] PAY_WINDOW запущен фоново для {mac[:8]}*** ({router_id})")
-
+    # PAY_WINDOW создаётся синхронно через /api/prepare_access из welcome.html
+    # activate_welcome теперь только создаёт запись в БД и редиректит
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
     return RedirectResponse(url=tariff_url, status_code=302)
 

@@ -72,9 +72,9 @@
             </div>
         </div>
         
-        <a href="/activate_welcome?mac={{ mac }}&router_id={{ router_id }}" class="btn-start" style="text-decoration: none; display: block;">
+        <button type="button" class="btn-start" id="btnStart">
             ВЫБРАТЬ ТАРИФ
-        </a>
+        </button>
         
         <div class="mac-id">ID: {{ mac }}</div>
     </div>
@@ -88,36 +88,49 @@
     <script>
     'use strict';
 
-    // Keep urlParams for potential future use
     const urlParams = new URLSearchParams(window.location.search);
     const macAddress = urlParams.get('mac') || "{{ mac }}";
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
     const isAndroid = /android/i.test(navigator.userAgent || '');
-    
-    const overlay = document.getElementById('loading-overlay');
 
-    // Update link href if URL params exist
-    if (macAddress && routerId) {
-        const link = document.querySelector('.btn-start');
-        if (link) {
-            if (isAndroid) {
-                // Android: intent URL прямо на /tariffs — без лишнего хопа через activate_welcome
-                const tariffPath = `/tariffs?mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
-                const fallbackUrl = `https://wifi-pay.kz${tariffPath}`;
-                link.href = `intent://wifi-pay.kz${tariffPath}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
-            } else {
-                const activatePath = `/activate_welcome?mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
-                link.href = activatePath;
-            }
+    const overlay = document.getElementById('loading-overlay');
+    const btn = document.getElementById('btnStart');
+
+    function navigateToTariffs() {
+        const tariffPath = '/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
+        if (isAndroid) {
+            const fallbackUrl = 'https://wifi-pay.kz' + tariffPath;
+            window.location = 'intent://wifi-pay.kz' + tariffPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(fallbackUrl) + ';end';
+            // Fallback: если intent не сработал за 2 сек — обычный переход
+            setTimeout(function() { window.location = tariffPath; }, 2000);
+        } else {
+            window.location = tariffPath;
         }
     }
 
-    document.querySelector('.btn-start').addEventListener('click', function() {
+    btn.addEventListener('click', function() {
+        btn.disabled = true;
         overlay.classList.add('active');
+
+        // Создаём PAY_WINDOW синхронно — ждём пока MikroTik настроит доступ
+        fetch('/api/prepare_access', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mac: macAddress, router_id: routerId})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            navigateToTariffs();
+        })
+        .catch(function() {
+            // Ошибка сети — всё равно переходим (оплата сама создаст доступ)
+            navigateToTariffs();
+        });
     });
 
     window.addEventListener('pageshow', function() {
         overlay.classList.remove('active');
+        btn.disabled = false;
     });
     </script>
 
