@@ -112,11 +112,7 @@ const isAndroid = /android/i.test(ua);
 
 const tariffUrl = `/tariffs?mac=${encodeURIComponent(MAC)}&router_id=${encodeURIComponent(ROUTER_ID)}`;
 
-// iOS: HTTP запрос к captive.apple.com перехватывается MikroTik → captive portal снова.
-// Android: просто редирект на страницу тарифов.
-const expiredRedirectUrl = isIOS
-    ? 'http://captive.apple.com/hotspot-detect.html'
-    : tariffUrl;
+const expiredRedirectUrl = tariffUrl;
 
 // Названия тарифов
 function tariffName(minutes) {

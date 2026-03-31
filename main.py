@@ -913,6 +913,7 @@ async def payment_result(request: Request):
 
         router_id = router_id or 'astana_01'
         minutes = 1440
+        paid_expires_at = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat()
 
         logger.info(f"[payment_result] Активирую PAID на {minutes} минут для {mac[:8]}*** на {router_id}")
         if not mac or not await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes, mode="PAID"):
@@ -924,19 +925,19 @@ async def payment_result(request: Request):
             updated = 0
             if payment_order_id:
                 updated = conn.execute(
-                    "UPDATE orders SET status = 'PAID', amount = ?, mac_address = ?, router_id = ? WHERE payment_order_id = ?",
-                    (amount, mac, router_id, payment_order_id),
+                    "UPDATE orders SET status = 'PAID', amount = ?, mac_address = ?, router_id = ?, expires_at = ? WHERE payment_order_id = ?",
+                    (amount, mac, router_id, paid_expires_at, payment_order_id),
                 ).rowcount
             elif mac:
                 updated = conn.execute(
-                    "UPDATE orders SET status = 'PAID', amount = ?, router_id = ? WHERE id = (SELECT id FROM orders WHERE mac_address = ? AND status IN ('PAYMENT_INITIATED', 'PAY_WINDOW') ORDER BY id DESC LIMIT 1)",
-                    (amount, router_id, mac),
+                    "UPDATE orders SET status = 'PAID', amount = ?, router_id = ?, expires_at = ? WHERE id = (SELECT id FROM orders WHERE mac_address = ? AND status IN ('PAYMENT_INITIATED', 'PAY_WINDOW') ORDER BY id DESC LIMIT 1)",
+                    (amount, router_id, paid_expires_at, mac),
                 ).rowcount
 
             if not updated:
                 conn.execute(
-                    "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id) VALUES (?, ?, 'PAID', ?, ?)",
-                    (mac, amount, router_id, payment_order_id),
+                    "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id, expires_at) VALUES (?, ?, 'PAID', ?, ?, ?)",
+                    (mac, amount, router_id, payment_order_id, paid_expires_at),
                 )
             conn.commit()
             logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ обработано для {mac[:8]}*** на 24 часа ({minutes} минут)")
