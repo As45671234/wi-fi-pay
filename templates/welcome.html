@@ -131,32 +131,18 @@
     logClient('page_loaded', 0, 'ua=' + userAgent.slice(0, 80));
 
     form.addEventListener('submit', function(event) {
-        var t0 = Date.now();
-        logClient('submit_clicked', 0, isIOS ? 'ios' : (isAndroid ? 'android' : 'non-ios'));
-
-        // Android: сначала принудительно уводим в браузер, а уже там выполняется prepare_and_tariffs.
+        // Android: мгновенный handoff в браузер БЕЗ загрузок и ожиданий.
         if (isAndroid) {
             event.preventDefault();
-            btn.disabled = true;
-            overlay.classList.add('active');
-            if (loadingSub) {
-                loadingSub.textContent = 'Открываем браузер...';
-            }
-
             var absPrepareUrl = 'https://wifi-pay.kz/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress)
                 + '&router_id=' + encodeURIComponent(routerId)
                 + '&cid=' + encodeURIComponent(cid);
-            logClient('android_browser_handoff', Date.now() - t0, 'abs_prepare_and_tariffs');
-            window.location.assign(absPrepareUrl);
-
-            setTimeout(function() {
-                if (document.visibilityState === 'visible') {
-                    logClient('android_handoff_retry', Date.now() - t0, 'still_visible_after_2s');
-                    window.location.assign(absPrepareUrl);
-                }
-            }, 2000);
+            window.location.replace(absPrepareUrl);
             return;
         }
+
+        var t0 = Date.now();
+        logClient('submit_clicked', 0, isIOS ? 'ios' : 'non-ios');
 
         // iOS captive: сначала дожидаемся prepare_access, потом делаем явный переход.
         if (isIOS) {
