@@ -72,9 +72,13 @@
             </div>
         </div>
         
-        <button type="button" class="btn-start" id="btnStart">
-            ВЫБРАТЬ ТАРИФ
-        </button>
+        <form id="prepareForm" action="/prepare_and_tariffs" method="get" style="margin: 0;">
+            <input type="hidden" name="mac" value="{{ mac }}">
+            <input type="hidden" name="router_id" value="{{ router_id }}">
+            <button type="submit" class="btn-start" id="btnStart">
+                ВЫБРАТЬ ТАРИФ
+            </button>
+        </form>
         
         <div class="mac-id">ID: {{ mac }}</div>
     </div>
@@ -88,18 +92,21 @@
     <script>
     'use strict';
 
-    var urlParams = new URLSearchParams(window.location.search);
-    var macAddress = urlParams.get('mac') || "{{ mac }}";
-    var routerId = urlParams.get('router_id') || "{{ router_id }}";
-
+    var form = document.getElementById('prepareForm');
     var btn = document.getElementById('btnStart');
     var overlay = document.getElementById('loading-overlay');
-    var prepareUrl = '/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
 
-    btn.addEventListener('click', function() {
+    form.addEventListener('submit', function() {
         btn.disabled = true;
         overlay.classList.add('active');
-        window.location = prepareUrl;
+
+        // Если переход не случился (каприз captive webview), возвращаем управление.
+        setTimeout(function() {
+            if (document.visibilityState === 'visible') {
+                btn.disabled = false;
+                overlay.classList.remove('active');
+            }
+        }, 8000);
     });
 
     window.addEventListener('pageshow', function() {
