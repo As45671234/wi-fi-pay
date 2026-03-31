@@ -725,11 +725,23 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
     user_agent = (request.headers.get("user-agent") or "")
     is_android = bool(re.search(r"android", user_agent, re.IGNORECASE))
 
-    # Android: после появления интернета captive flow может оборвать цепочку 303->/tariffs.
-    # Поэтому отдаём тарифы сразу в этом же ответе.
+    # Android: после появления интернета captive flow часто залипает на тяжелом HTML.
+    # Отдаем легкий bridge, который сразу переводит на /tariffs.
     if is_android:
-        logger.info(f"[prepare_and_tariffs] android direct HTML cid={cid}, total: {total_ms:.0f}ms для {mac[:8]}***")
-        return _build_tariffs_response(request, mac, router_id, cid)
+        logger.info(f"[prepare_and_tariffs] android bridge cid={cid}, total: {total_ms:.0f}ms для {mac[:8]}***")
+        response = templates.TemplateResponse(
+            "android_bridge.html",
+            {
+                "request": request,
+                "mac": mac,
+                "router_id": router_id,
+                "cid": cid,
+            },
+        )
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
     logger.info(f"[prepare_and_tariffs] redirect cid={cid} -> /tariffs, total: {total_ms:.0f}ms для {mac[:8]}***")
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"

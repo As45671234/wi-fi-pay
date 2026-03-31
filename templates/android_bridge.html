@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Переход к тарифам</title>
+</head>
+<body>
+  <p>Открываем тарифы...</p>
+  <p><a id="go" href="#">Открыть вручную</a></p>
+  <script>
+    (function () {
+      var target = '/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}';
+      var absTarget = 'https://wifi-pay.kz' + target;
+      var link = document.getElementById('go');
+      if (link) link.href = absTarget;
+
+      // Сначала same-origin переход, затем fallback на абсолютный URL.
+      window.location.replace(target);
+      setTimeout(function () {
+        if (document.visibilityState === 'visible') {
+          window.location.replace(absTarget);
+        }
+      }, 1200);
+    })();
+  </script>
+</body>
+</html>
