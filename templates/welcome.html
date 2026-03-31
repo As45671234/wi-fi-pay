@@ -134,8 +134,32 @@
         var t0 = Date.now();
         logClient('submit_clicked', 0, isIOS ? 'ios' : (isAndroid ? 'android' : 'non-ios'));
 
-        // iOS/Android captive: сначала дожидаемся prepare_access, потом делаем явный переход.
-        if (isIOS || isAndroid) {
+        // Android: сначала принудительно уводим в браузер, а уже там выполняется prepare_and_tariffs.
+        if (isAndroid) {
+            event.preventDefault();
+            btn.disabled = true;
+            overlay.classList.add('active');
+            if (loadingSub) {
+                loadingSub.textContent = 'Открываем браузер...';
+            }
+
+            var absPrepareUrl = 'https://wifi-pay.kz/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress)
+                + '&router_id=' + encodeURIComponent(routerId)
+                + '&cid=' + encodeURIComponent(cid);
+            logClient('android_browser_handoff', Date.now() - t0, 'abs_prepare_and_tariffs');
+            window.location.assign(absPrepareUrl);
+
+            setTimeout(function() {
+                if (document.visibilityState === 'visible') {
+                    logClient('android_handoff_retry', Date.now() - t0, 'still_visible_after_2s');
+                    window.location.assign(absPrepareUrl);
+                }
+            }, 2000);
+            return;
+        }
+
+        // iOS captive: сначала дожидаемся prepare_access, потом делаем явный переход.
+        if (isIOS) {
             event.preventDefault();
             btn.disabled = true;
             overlay.classList.add('active');
@@ -151,20 +175,18 @@
             .then(function(response) { return response.json(); })
             .then(function(data) {
                 if (data && data.ok) {
-                    logClient('prepare_ok', Date.now() - t0, isIOS ? 'ios_nav_tariffs_same_origin' : 'android_nav_tariffs_same_origin');
+                    logClient('prepare_ok', Date.now() - t0, 'ios_nav_tariffs_same_origin');
                     var relTariffUrl = '/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId) + '&cid=' + encodeURIComponent(cid);
                     var absTariffUrl = 'https://wifi-pay.kz' + relTariffUrl;
                     window.location.assign(relTariffUrl);
 
-                    // iOS captive иногда задерживает переход. Для Android fallback тоже оставим,
-                    // но с меньшим таймаутом, чтобы быстрее выйти в рабочий браузер при залипании.
+                    // iOS captive иногда задерживает переход. Если через 3с мы всё ещё здесь — fallback.
                     setTimeout(function() {
                         if (document.visibilityState === 'visible') {
-                            var extra = isIOS ? 'ios_still_visible_after_3s' : 'android_still_visible_after_2s';
-                            logClient('nav_fallback_abs', Date.now() - t0, extra);
+                            logClient('nav_fallback_abs', Date.now() - t0, 'ios_still_visible_after_3s');
                             window.location.assign(absTariffUrl);
                         }
-                    }, isIOS ? 3000 : 2000);
+                    }, 3000);
                     return;
                 }
                 throw new Error((data && data.error) ? data.error : 'prepare_access failed');
