@@ -636,7 +636,11 @@ async def prepare_access(request: Request):
 async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01", cid: str = ""):
     cid = (cid or make_cid())[:24]
     logger.info(f"[welcome] cid={cid} mac={mac[:8]}*** router={router_id}")
-    return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id, "cid": cid})
+    response = templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id, "cid": cid})
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def _build_tariffs_response(request: Request, mac: str, router_id: str, cid: str = ""):
