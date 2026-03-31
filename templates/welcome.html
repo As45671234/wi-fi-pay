@@ -97,14 +97,15 @@
     const btn = document.getElementById('btnStart');
 
     function navigateToTariffs() {
-        const tariffPath = '/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
+        // После PAY_WINDOW домен captive portal (hotspot.wifi-pay.local) перестаёт резолвиться.
+        // Поэтому переходим по абсолютному URL на wifi-pay.kz.
+        var tariffPath = '/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
+        var fullUrl = 'https://wifi-pay.kz' + tariffPath;
         if (isAndroid) {
-            const fallbackUrl = 'https://wifi-pay.kz' + tariffPath;
-            window.location = 'intent://wifi-pay.kz' + tariffPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(fallbackUrl) + ';end';
-            // Fallback: если intent не сработал за 2 сек — обычный переход
-            setTimeout(function() { window.location = tariffPath; }, 2000);
+            window.location = 'intent://wifi-pay.kz' + tariffPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(fullUrl) + ';end';
+            setTimeout(function() { window.location = fullUrl; }, 2000);
         } else {
-            window.location = tariffPath;
+            window.location = fullUrl;
         }
     }
 

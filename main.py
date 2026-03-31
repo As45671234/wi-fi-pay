@@ -315,9 +315,22 @@ def _mikrotik_setup_scheduler(api, sched, mac, user_name, mode, seconds, minutes
     """Настраивает scheduler на MikroTik для автоочистки доступа."""
     try:
         clock_info = api.get_resource('/system/clock').call('print')[0]
-        date_str = clock_info.get('date', '').title()
+        date_str = clock_info.get('date', '')
         time_str = clock_info.get('time', '')
-        mt_now = datetime.strptime(f"{date_str} {time_str}", "%b/%d/%Y %H:%M:%S")
+        # MikroTik может вернуть дату в разных форматах
+        mt_now = None
+        for fmt in ("%b/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                mt_now = datetime.strptime(f"{date_str} {time_str}", fmt)
+                break
+            except ValueError:
+                try:
+                    mt_now = datetime.strptime(f"{date_str.title()} {time_str}", fmt)
+                    break
+                except ValueError:
+                    continue
+        if mt_now is None:
+            raise ValueError(f"Unknown clock format: '{date_str}' '{time_str}'")
     except Exception as e:
         logger.error(f"Clock parse error: {e}")
         mt_now = datetime.now(KZ_TZ).replace(tzinfo=None)
