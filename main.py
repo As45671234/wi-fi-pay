@@ -604,8 +604,7 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
     return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id})
 
 
-@app.get("/tariffs", response_class=HTMLResponse)
-async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+def _build_tariffs_response(request: Request, mac: str, router_id: str):
     trial_ts = str(int(time.time()))
     trial_sig = make_trial_signature(mac, router_id, trial_ts)
     device_id, _ = get_or_create_device_id(request)
@@ -626,6 +625,64 @@ async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+
+@app.get("/prepare_and_tariffs", response_class=HTMLResponse)
+async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "astana_01"):
+    """Один запрос: сначала готовим PAY_WINDOW, затем сразу отдаём HTML тарифов без второго перехода."""
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        return templates.TemplateResponse("welcome.html", {
+            "request": request,
+            "mac": mac,
+            "router_id": router_id,
+            "error": "Некорректный MAC",
+        })
+    if router_id not in ROUTERS_CONFIG:
+        return templates.TemplateResponse("welcome.html", {
+            "request": request,
+            "mac": mac,
+            "router_id": router_id,
+            "error": "Неизвестный роутер",
+        })
+
+    t_start = time.monotonic()
+    try:
+        ok = await asyncio.wait_for(
+            asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
+            timeout=6,
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"[prepare_and_tariffs] TIMEOUT >6s для {mac[:8]}*** ({router_id})")
+        return utf8_json_response(
+            {"ok": False, "error": "Роутер отвечает слишком долго. Повторите через пару секунд."},
+            status_code=504,
+        )
+
+    if not ok:
+        logger.error(f"[prepare_and_tariffs] PAY_WINDOW не создан для {mac[:8]}*** ({router_id})")
+        return utf8_json_response(
+            {"ok": False, "error": "Не удалось подготовить доступ. Повторите попытку."},
+            status_code=502,
+        )
+
+    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at) VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
+            (mac, router_id, expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    logger.info(f"[prepare_and_tariffs] total: {(time.monotonic()-t_start)*1000:.0f}ms для {mac[:8]}***")
+    return _build_tariffs_response(request, mac, router_id)
+
+
+@app.get("/tariffs", response_class=HTMLResponse)
+async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+    return _build_tariffs_response(request, mac, router_id)
 
 
 @app.get("/health")

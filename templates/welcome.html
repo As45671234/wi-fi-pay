@@ -94,40 +94,12 @@
 
     var btn = document.getElementById('btnStart');
     var overlay = document.getElementById('loading-overlay');
-    var loadingSub = document.querySelector('.loading-sub');
-
-    function navigateToTariffs() {
-        var tariffUrl = 'https://wifi-pay.kz/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
-        window.location = tariffUrl;
-    }
+    var prepareUrl = '/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
 
     btn.addEventListener('click', function() {
         btn.disabled = true;
         overlay.classList.add('active');
-
-        fetch('/api/prepare_access', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({mac: macAddress, router_id: routerId})
-        })
-        .then(function(response) {
-            return response.json();
-        })
-        .then(function(data) {
-            if (data && data.ok) {
-                navigateToTariffs();
-                return;
-            }
-            throw new Error((data && data.error) ? data.error : 'prepare_access failed');
-        })
-        .catch(function(err) {
-            btn.disabled = false;
-            overlay.classList.remove('active');
-            if (loadingSub) {
-                loadingSub.textContent = 'Ошибка подготовки. Повторите.';
-            }
-            console.log('prepare_access error:', err);
-        });
+        window.location = prepareUrl;
     });
 
     window.addEventListener('pageshow', function() {
