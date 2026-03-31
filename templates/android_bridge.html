@@ -6,25 +6,41 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
+  <meta http-equiv="refresh" content="0;url=https://wifi-pay.kz/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">
   <title>Переход к тарифам</title>
 </head>
 <body>
   <p>Открываем тарифы...</p>
   <p><a id="go" href="#">Открыть вручную</a></p>
+  <form id="goForm" method="get" action="/tariffs" style="display:none;">
+    <input type="hidden" name="mac" value="{{ mac }}">
+    <input type="hidden" name="router_id" value="{{ router_id }}">
+    <input type="hidden" name="cid" value="{{ cid }}">
+  </form>
   <script>
     (function () {
       var target = '/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}';
       var absTarget = 'https://wifi-pay.kz' + target;
       var link = document.getElementById('go');
       if (link) link.href = absTarget;
+      var form = document.getElementById('goForm');
 
-      // Сначала same-origin переход, затем fallback на абсолютный URL.
+      // 1) Пытаемся same-origin replace
       window.location.replace(target);
+
+      // 2) Через 300мс дублируем абсолютным replace
       setTimeout(function () {
         if (document.visibilityState === 'visible') {
           window.location.replace(absTarget);
         }
-      }, 1200);
+      }, 300);
+
+      // 3) Через 900мс fallback через form submit (другой механизм навигации)
+      setTimeout(function () {
+        if (document.visibilityState === 'visible' && form) {
+          form.submit();
+        }
+      }, 900);
     })();
   </script>
 </body>
