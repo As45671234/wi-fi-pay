@@ -1,12 +1,17 @@
 #!/bin/bash
 # Скрипт для очистки истории устройства
 
+# Использование:
+#   ./clear_device.sh <MAC> [ROUTER_IP]
+# Пример:
+#   ./clear_device.sh C2:01:4B:59:A5:12 10.0.0.4
+
 MAC="${1:-22:1D:C8:99:FE:B0}"
-ROUTER_IP="10.0.0.2"
+ROUTER_IP="${2:-10.0.0.2}"
 ROUTER_USER="admin"
 SSH_KEY="$HOME/.ssh/mikrotik_key"
 
-echo "🧹 Очистка истории для MAC: $MAC"
+echo "🧹 Очистка истории для MAC: $MAC на роутере $ROUTER_IP"
 
 # Проверка SSH ключа
 if [ ! -f "$SSH_KEY" ]; then
@@ -27,6 +32,8 @@ ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no ${ROUTER_USER}@${ROUTER_IP} << EOF
 /ip hotspot user remove [find comment~"$MAC"]
 /ip hotspot ip-binding remove [find mac-address="$MAC"]
 /ip hotspot active remove [find mac-address="$MAC"]
+/ip hotspot cookie remove [find mac-address="$MAC"]
+/ip hotspot host remove [find mac-address="$MAC"]
 /system scheduler remove [find name~"$MAC_HEX"]
 EOF
 
