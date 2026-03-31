@@ -8,6 +8,7 @@ import sqlite3
 import re
 import secrets
 import json
+import socket
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode, unquote
@@ -53,7 +54,6 @@ TRIAL_TOKEN_TTL_SECONDS = 5 * 60
 TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
-# _PAY_WINDOW_TASKS больше не нужен — PAY_WINDOW создаётся синхронно через /api/prepare_access
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
@@ -374,6 +374,14 @@ def _mikrotik_setup_scheduler(api, sched, mac, user_name, mode, seconds, minutes
 
 # --- ЯДРО: MIKROTIK API ---
 
+def _router_api_reachable(ip: str, port: int, timeout_sec: float = 0.8) -> bool:
+    """Быстрый precheck TCP до RouterOS API, чтобы не зависать на долгом connect timeout."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout_sec):
+            return True
+    except OSError:
+        return False
+
 def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, seconds: int | None = None):
     config = ROUTERS_CONFIG.get(router_id)
     if not config:
@@ -385,7 +393,15 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
         return False
 
     connection = None
-    max_retries = 3
+    # Для PAY_WINDOW держим fail-fast, чтобы UX не зависал на десятки секунд.
+    max_retries = 1 if mode == 'PAY_WINDOW' else 3
+    api_port = int(config.get('port', 8728))
+
+    # Fail-fast: если API-порт недоступен, не тратим десятки секунд на retries библиотеки.
+    if mode == 'PAY_WINDOW' and not _router_api_reachable(config['ip'], api_port):
+        logger.error(f"[MK] API недоступен {router_id} ({config['ip']}:{api_port})")
+        return False
+
     for attempt in range(1, max_retries + 1):
         try:
             t0 = time.monotonic()
@@ -393,7 +409,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 config['ip'],
                 username=config['user'],
                 password=config['pass'],
-                port=config.get('port', 8728),
+                port=api_port,
                 plaintext_login=True,
             )
             api = connection.get_api()
@@ -546,6 +562,26 @@ async def prepare_access(request: Request):
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"ok": False, "error": "Неизвестный роутер"}, status_code=400)
 
+    t_mk = time.monotonic()
+    try:
+        ok = await asyncio.wait_for(
+            asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
+            timeout=6,
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"[prepare_access] TIMEOUT >6s для {mac[:8]}*** ({router_id})")
+        return utf8_json_response(
+            {"ok": False, "error": "Роутер отвечает слишком долго. Повторите через пару секунд."},
+            status_code=504,
+        )
+
+    if not ok:
+        logger.error(f"[prepare_access] PAY_WINDOW не создан для {mac[:8]}*** ({router_id})")
+        return utf8_json_response(
+            {"ok": False, "error": "Не удалось подготовить доступ. Повторите попытку."},
+            status_code=502,
+        )
+
     t_db = time.monotonic()
     expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
     conn = get_db()
@@ -559,8 +595,6 @@ async def prepare_access(request: Request):
         conn.close()
     logger.info(f"[prepare_access] DB INSERT: {(time.monotonic()-t_db)*1000:.0f}ms")
 
-    t_mk = time.monotonic()
-    ok = await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW")
     logger.info(f"[prepare_access] MikroTik: {(time.monotonic()-t_mk)*1000:.0f}ms, total: {(time.monotonic()-t_start)*1000:.0f}ms, {'✓' if ok else '✗'} для {mac[:8]}***")
     return utf8_json_response({"ok": ok})
 

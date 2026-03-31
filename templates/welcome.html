@@ -88,50 +88,45 @@
     <script>
     'use strict';
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const macAddress = urlParams.get('mac') || "{{ mac }}";
-    const routerId = urlParams.get('router_id') || "{{ router_id }}";
-    const isAndroid = /android/i.test(navigator.userAgent || '');
+    var urlParams = new URLSearchParams(window.location.search);
+    var macAddress = urlParams.get('mac') || "{{ mac }}";
+    var routerId = urlParams.get('router_id') || "{{ router_id }}";
 
-    const overlay = document.getElementById('loading-overlay');
-    const btn = document.getElementById('btnStart');
+    var btn = document.getElementById('btnStart');
+    var overlay = document.getElementById('loading-overlay');
+    var loadingSub = document.querySelector('.loading-sub');
 
     function navigateToTariffs() {
-        // После PAY_WINDOW домен captive portal (hotspot.wifi-pay.local) перестаёт резолвиться.
-        // Поэтому переходим по абсолютному URL на wifi-pay.kz.
-        var tariffPath = '/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
-        var fullUrl = 'https://wifi-pay.kz' + tariffPath;
-        if (isAndroid) {
-            window.location = 'intent://wifi-pay.kz' + tariffPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(fullUrl) + ';end';
-            setTimeout(function() { window.location = fullUrl; }, 2000);
-        } else {
-            window.location = fullUrl;
-        }
+        var tariffUrl = 'https://wifi-pay.kz/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId);
+        window.location = tariffUrl;
     }
 
     btn.addEventListener('click', function() {
         btn.disabled = true;
         overlay.classList.add('active');
-        var t0 = Date.now();
-        var loadMsg = document.querySelector('.loading-sub');
 
-        // Создаём PAY_WINDOW синхронно — ждём пока MikroTik настроит доступ
         fetch('/api/prepare_access', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({mac: macAddress, router_id: routerId})
         })
-        .then(function(r) {
-            if (loadMsg) loadMsg.textContent = 'Ответ сервера: ' + (Date.now()-t0) + 'мс';
-            return r.json();
+        .then(function(response) {
+            return response.json();
         })
         .then(function(data) {
-            console.log('prepare_access: ' + (Date.now()-t0) + 'ms');
-            navigateToTariffs();
+            if (data && data.ok) {
+                navigateToTariffs();
+                return;
+            }
+            throw new Error((data && data.error) ? data.error : 'prepare_access failed');
         })
-        .catch(function() {
-            console.log('prepare_access FAIL: ' + (Date.now()-t0) + 'ms');
-            navigateToTariffs();
+        .catch(function(err) {
+            btn.disabled = false;
+            overlay.classList.remove('active');
+            if (loadingSub) {
+                loadingSub.textContent = 'Ошибка подготовки. Повторите.';
+            }
+            console.log('prepare_access error:', err);
         });
     });
 
