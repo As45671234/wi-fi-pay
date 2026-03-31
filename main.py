@@ -740,13 +740,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
         logger.error(f"[activate_welcome] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    user_agent = (request.headers.get("user-agent") or "").lower()
-    is_ios = any(d in user_agent for d in ["iphone", "ipad", "ipod"])
-    duration_sec = 90 if is_ios else 180
-    minutes = 1 if is_ios else 3
-    seconds = 90 if is_ios else None
-
-    expires_at = (datetime.utcnow() + timedelta(seconds=duration_sec)).isoformat()
+    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
     conn = get_db()
     try:
         conn.execute(
@@ -759,7 +753,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
     # Запускаем PAY_WINDOW фоново — не ждём, редиректим сразу.
     asyncio.create_task(asyncio.to_thread(
-        set_mikrotik_ah_access, mac, router_id, minutes, "PAY_WINDOW", seconds
+        set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"
     ))
     logger.info(f"[activate_welcome] PAY_WINDOW запущен фоново для {mac[:8]}*** ({router_id})")
 

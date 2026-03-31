@@ -110,11 +110,13 @@ const ua = navigator.userAgent || '';
 const isIOS = /iPad|iPhone|iPod/i.test(ua);
 const isAndroid = /android/i.test(ua);
 
-// URL куда редиректить при истечении сессии.
-// HTTP-запрос к этим адресам перехватывается MikroTik → login.html → wifi-pay.kz (captive portal).
-const captiveUrl = isIOS
+const tariffUrl = `/tariffs?mac=${encodeURIComponent(MAC)}&router_id=${encodeURIComponent(ROUTER_ID)}`;
+
+// iOS: HTTP запрос к captive.apple.com перехватывается MikroTik → captive portal снова.
+// Android: просто редирект на страницу тарифов.
+const expiredRedirectUrl = isIOS
     ? 'http://captive.apple.com/hotspot-detect.html'
-    : 'http://connectivitycheck.gstatic.com/generate_204';
+    : tariffUrl;
 
 // Названия тарифов
 function tariffName(minutes) {
@@ -144,7 +146,7 @@ if (!expiryTs || expiryTs < Date.now()) {
     localStorage.setItem(storageKey, String(expiryTs));
 }
 
-document.getElementById('expiredBtn').href = captiveUrl;
+document.getElementById('expiredBtn').href = expiredRedirectUrl;
 
 function formatTime(ms) {
     if (ms <= 0) return "00:00:00";
@@ -185,9 +187,8 @@ function tick() {
         hint.textContent = 'Нажмите кнопку ниже — откроется страница выбора тарифов.';
         localStorage.removeItem(storageKey);
 
-        // Auto-redirect: на iOS/Android триггерим перехват MikroTik через HTTP,
-        // что заново откроет captive portal.
-        setTimeout(() => { window.location.href = captiveUrl; }, 5000);
+        // Auto-redirect
+        setTimeout(() => { window.location.href = expiredRedirectUrl; }, 5000);
         return;
     }
 
