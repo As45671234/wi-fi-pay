@@ -33,7 +33,7 @@
             <span class="name">Безлимит на день</span>
             <span class="price"><span class="old">2000 ₸</span>200 ₸</span>
         </div>
-        <a class="btn" target="_blank" rel="noopener noreferrer" href="/start_payment?amount=200&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}">ОПЛАТИТЬ 200 ₸</a>
+        <a class="btn" id="payNowBtn" target="_blank" rel="noopener noreferrer" href="/start_payment?amount=200&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">ОПЛАТИТЬ 200 ₸</a>
     </div>
 
     <div class="plan">
@@ -49,18 +49,62 @@
             <input type="hidden" name="router_id" value="{{ router_id }}">
             <input type="hidden" name="trial_ts" value="{{ trial_ts }}">
             <input type="hidden" name="trial_sig" value="{{ trial_sig }}">
+            <input type="hidden" name="cid" value="{{ cid }}">
             <button type="submit" class="btn btn-trial">ПОЛУЧИТЬ 15 МИНУТ</button>
         </form>
         {% endif %}
     </div>
 
     <div class="links">
-        <a href="/payment_methods?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}">Оплата и возврат</a>
-        <a href="/offer?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}">Оферта</a>
-        <a href="/privacy?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}">Приватность</a>
+        <a href="/payment_methods?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оплата и возврат</a>
+        <a href="/offer?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оферта</a>
+        <a href="/privacy?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Приватность</a>
     </div>
 
     <div class="id">ID: {{ mac }}</div>
 </div>
+<script>
+'use strict';
+var cid = "{{ cid }}";
+var ua = navigator.userAgent || '';
+
+function logClient(stage, extra) {
+    var payload = {
+        cid: cid,
+        page: 'tariffs_ios_light',
+        stage: stage,
+        elapsed_ms: null,
+        extra: extra || ''
+    };
+    try {
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon('/client_event', new Blob([JSON.stringify(payload)], {type: 'application/json'}));
+            return;
+        }
+    } catch (e) {}
+    fetch('/client_event', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+        keepalive: true
+    }).catch(function() {});
+}
+
+logClient('page_loaded', 'ua=' + ua.slice(0, 80));
+
+var payBtn = document.getElementById('payNowBtn');
+if (payBtn) {
+    payBtn.addEventListener('click', function() {
+        logClient('pay_clicked', 'amount=200');
+    });
+}
+
+var trialForm = document.querySelector('form[action="/get_free_trial"]');
+if (trialForm) {
+    trialForm.addEventListener('submit', function() {
+        logClient('trial_submit', 'start');
+    });
+}
+</script>
 </body>
 </html>

@@ -75,6 +75,7 @@
         <form id="prepareForm" action="/prepare_and_tariffs" method="get" style="margin: 0;">
             <input type="hidden" name="mac" value="{{ mac }}">
             <input type="hidden" name="router_id" value="{{ router_id }}">
+            <input type="hidden" name="cid" value="{{ cid }}">
             <button type="submit" class="btn-start" id="btnStart">
                 ВЫБРАТЬ ТАРИФ
             </button>
@@ -92,17 +93,87 @@
     <script>
     'use strict';
 
+    var urlParams = new URLSearchParams(window.location.search);
+    var macAddress = urlParams.get('mac') || "{{ mac }}";
+    var routerId = urlParams.get('router_id') || "{{ router_id }}";
+    var cid = urlParams.get('cid') || "{{ cid }}";
+    var userAgent = navigator.userAgent || '';
+    var isIOS = /iPad|iPhone|iPod/i.test(userAgent);
+
     var form = document.getElementById('prepareForm');
     var btn = document.getElementById('btnStart');
     var overlay = document.getElementById('loading-overlay');
+    var loadingSub = document.querySelector('.loading-sub');
 
-    form.addEventListener('submit', function() {
+    function logClient(stage, elapsedMs, extra) {
+        var payload = {
+            cid: cid,
+            page: 'welcome',
+            stage: stage,
+            elapsed_ms: typeof elapsedMs === 'number' ? Math.round(elapsedMs) : null,
+            extra: extra || ''
+        };
+        try {
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon('/client_event', new Blob([JSON.stringify(payload)], {type: 'application/json'}));
+                return;
+            }
+        } catch (e) {}
+        fetch('/client_event', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+            keepalive: true
+        }).catch(function() {});
+    }
+
+    logClient('page_loaded', 0, 'ua=' + userAgent.slice(0, 80));
+
+    form.addEventListener('submit', function(event) {
+        var t0 = Date.now();
+        logClient('submit_clicked', 0, isIOS ? 'ios' : 'non-ios');
+
+        // iOS captive: надежнее сначала дождаться prepare_access, потом сделать явный переход.
+        if (isIOS) {
+            event.preventDefault();
+            btn.disabled = true;
+            overlay.classList.add('active');
+            if (loadingSub) {
+                loadingSub.textContent = 'Подготавливаем доступ...';
+            }
+
+            fetch('/api/prepare_access', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mac: macAddress, router_id: routerId, cid: cid})
+            })
+            .then(function(response) { return response.json(); })
+            .then(function(data) {
+                if (data && data.ok) {
+                    logClient('prepare_ok', Date.now() - t0, 'redirect_to_tariffs');
+                    window.location.replace('https://wifi-pay.kz/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId) + '&cid=' + encodeURIComponent(cid));
+                    return;
+                }
+                throw new Error((data && data.error) ? data.error : 'prepare_access failed');
+            })
+            .catch(function() {
+                logClient('prepare_fail', Date.now() - t0, 'api_prepare_access_error');
+                btn.disabled = false;
+                overlay.classList.remove('active');
+                if (loadingSub) {
+                    loadingSub.textContent = 'Ошибка подготовки. Повторите.';
+                }
+            });
+            return;
+        }
+
         btn.disabled = true;
         overlay.classList.add('active');
 
         // Если переход не случился (каприз captive webview), возвращаем управление.
         setTimeout(function() {
             if (document.visibilityState === 'visible') {
+                logClient('submit_timeout_visible', Date.now() - t0, 'non-ios-no-nav');
                 btn.disabled = false;
                 overlay.classList.remove('active');
             }

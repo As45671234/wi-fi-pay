@@ -112,12 +112,37 @@
     const urlParams = new URLSearchParams(window.location.search);
     const macAddress = urlParams.get('mac') || "{{ mac }}";
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
+    const cid = urlParams.get('cid') || "{{ cid }}";
     const trialTs = "{{ trial_ts }}";
     const trialSig = "{{ trial_sig }}";
     const trialUsed = {{ trial_used }};
     const userAgent = navigator.userAgent || '';
     const isAndroid = /android/i.test(userAgent);
     const isIOS = /iPad|iPhone|iPod/i.test(userAgent);
+
+    function logClient(stage, elapsedMs, extra) {
+        const payload = {
+            cid,
+            page: 'tariffs',
+            stage,
+            elapsed_ms: typeof elapsedMs === 'number' ? Math.round(elapsedMs) : null,
+            extra: extra || ''
+        };
+        try {
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon('/client_event', new Blob([JSON.stringify(payload)], {type: 'application/json'}));
+                return;
+            }
+        } catch (e) {}
+        fetch('/client_event', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+            keepalive: true
+        }).catch(() => {});
+    }
+
+    logClient('page_loaded', 0, 'ua=' + userAgent.slice(0, 80));
 
     function selectT(amount, element) {
         selectedAmt = amount;
@@ -164,20 +189,24 @@
     }
 
     function payNow() {
+        const t0 = Date.now();
+        logClient('pay_clicked', 0, 'amount=' + selectedAmt);
         const btn = document.getElementById('main-pay-btn');
         btn.disabled = true;
         btn.innerText = "ПОДГОТОВКА (3 МИН)...";
 
-        const payUrl = `/start_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}`;
+        const payUrl = `/start_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
 
         // Android works better with a normal same-tab navigation after opening the browser.
         if (isAndroid) {
+            logClient('pay_nav_android', Date.now() - t0, 'same_tab');
             window.location.href = payUrl;
             return;
         }
 
         // iOS captive portal requires target="_blank" to open Safari.
         if (isIOS) {
+            logClient('pay_nav_ios', Date.now() - t0, 'blank_tab');
             const link = document.createElement('a');
             link.href = payUrl;
             link.target = '_blank';
@@ -189,6 +218,7 @@
         }
 
         const link = document.createElement('a');
+        logClient('pay_nav_other', Date.now() - t0, 'anchor_click');
         link.href = payUrl;
         document.body.appendChild(link);
         link.click();
@@ -196,6 +226,8 @@
     }
 
     async function getTrial() {
+        const t0 = Date.now();
+        logClient('trial_clicked', 0, 'start');
         const btn = document.getElementById('trial-btn');
         const successBox = document.getElementById('trial-success');
         const notice = document.getElementById('trial-notice');
@@ -217,15 +249,18 @@
         fd.append('router_id', routerId);
         fd.append('trial_ts', trialTs);
         fd.append('trial_sig', trialSig);
+        fd.append('cid', cid);
 
         try {
             const response = await fetchWithTimeout('/get_free_trial', { method: 'POST', body: fd }, 9000);
             const data = await response.json();
 
             if (response.ok) {
+                logClient('trial_ok', Date.now() - t0, 'activated');
                 successBox.style.display = 'block';
                 btn.innerText = '15 МИНУТ АКТИВИРОВАНО';
             } else {
+                logClient('trial_fail_http', Date.now() - t0, 'status=' + response.status);
                 if (response.status === 403) {
                     showTrialNotice('warn', 'Лимит бесплатного доступа', data.error || 'Этот тариф можно включать только 1 раз в 24 часа.');
                 } else {
@@ -234,6 +269,7 @@
                 btn.disabled = false;
             }
         } catch (e) {
+            logClient('trial_fail_network', Date.now() - t0, 'timeout_or_network');
             showTrialNotice('error', 'Ошибка подключения', 'Роутер не ответил. Проверьте Wi-Fi и попробуйте еще раз.');
             btn.disabled = false;
         }

@@ -32,6 +32,33 @@ logger = logging.getLogger("WiFiGateway")
 
 app = FastAPI(title="Wi-Fi Gateway Final")
 
+
+def make_cid() -> str:
+    return secrets.token_hex(6)
+
+
+@app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    started = time.monotonic()
+    cid = (request.query_params.get("cid") or "-")[:24]
+    ip = get_client_ip(request)
+    ua = (request.headers.get("user-agent") or "")[:120]
+    method = request.method
+    path = request.url.path
+    query = request.url.query
+    try:
+        response = await call_next(request)
+        elapsed_ms = (time.monotonic() - started) * 1000
+        logger.info(
+            f"[HTTP] cid={cid} ip={ip} {method} {path}"
+            f"{'?' + query if query else ''} -> {response.status_code} in {elapsed_ms:.0f}ms ua='{ua}'"
+        )
+        return response
+    except Exception as e:
+        elapsed_ms = (time.monotonic() - started) * 1000
+        logger.exception(f"[HTTP] cid={cid} ip={ip} {method} {path} failed in {elapsed_ms:.0f}ms: {e}")
+        raise
+
 def utf8_json_response(content, status_code=200):
     return JSONResponse(content, status_code=status_code, headers={"Content-Type": "application/json; charset=utf-8"})
 
@@ -54,6 +81,7 @@ TRIAL_TOKEN_TTL_SECONDS = 5 * 60
 TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
+PREPARE_TIMEOUT_SECONDS = 10
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
@@ -501,19 +529,21 @@ def decode_nested_url_value(value: str) -> str:
         decoded = next_value
     return decoded
 
-def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str) -> str:
+def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str, cid: str = "") -> str:
     minutes = 1440
+    cid = (cid or make_cid())[:24]
     success_url = (
         f"https://wifi-pay.kz/success"
         f"?mac={mac}"
         f"&router_id={router_id}"
         f"&minutes={minutes}"
         f"&amount={amount}"
+        f"&cid={cid}"
     )
     params = {
         'pg_merchant_id': MERCHANT_ID, 'pg_amount': str(amount), 'pg_currency': 'KZT',
         'pg_description': f"Wi-Fi {mac}", 'pg_order_id': payment_order_id,
-        'pg_salt': 'salt', 'pg_param1': mac, 'pg_param2': router_id,
+        'pg_salt': 'salt', 'pg_param1': mac, 'pg_param2': router_id, 'pg_param3': cid,
         'pg_result_url': 'https://wifi-pay.kz/payment_result',
         'pg_success_url': success_url,
     }
@@ -556,6 +586,9 @@ async def prepare_access(request: Request):
     data = await request.json()
     mac = data.get("mac", "")
     router_id = data.get("router_id", "astana_01")
+    cid = (data.get("cid") or "-")[:24]
+
+    logger.info(f"[prepare_access] START cid={cid} mac={mac[:8]}*** router={router_id}")
 
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return utf8_json_response({"ok": False, "error": "Некорректный MAC"}, status_code=400)
@@ -566,17 +599,17 @@ async def prepare_access(request: Request):
     try:
         ok = await asyncio.wait_for(
             asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
-            timeout=6,
+            timeout=PREPARE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
-        logger.error(f"[prepare_access] TIMEOUT >6s для {mac[:8]}*** ({router_id})")
+        logger.error(f"[prepare_access] TIMEOUT cid={cid} >{PREPARE_TIMEOUT_SECONDS}s для {mac[:8]}*** ({router_id})")
         return utf8_json_response(
             {"ok": False, "error": "Роутер отвечает слишком долго. Повторите через пару секунд."},
             status_code=504,
         )
 
     if not ok:
-        logger.error(f"[prepare_access] PAY_WINDOW не создан для {mac[:8]}*** ({router_id})")
+        logger.error(f"[prepare_access] PAY_WINDOW FAIL cid={cid} для {mac[:8]}*** ({router_id})")
         return utf8_json_response(
             {"ok": False, "error": "Не удалось подготовить доступ. Повторите попытку."},
             status_code=502,
@@ -593,18 +626,20 @@ async def prepare_access(request: Request):
         conn.commit()
     finally:
         conn.close()
-    logger.info(f"[prepare_access] DB INSERT: {(time.monotonic()-t_db)*1000:.0f}ms")
+    logger.info(f"[prepare_access] DB INSERT cid={cid}: {(time.monotonic()-t_db)*1000:.0f}ms")
 
-    logger.info(f"[prepare_access] MikroTik: {(time.monotonic()-t_mk)*1000:.0f}ms, total: {(time.monotonic()-t_start)*1000:.0f}ms, {'✓' if ok else '✗'} для {mac[:8]}***")
+    logger.info(f"[prepare_access] DONE cid={cid} MikroTik: {(time.monotonic()-t_mk)*1000:.0f}ms, total: {(time.monotonic()-t_start)*1000:.0f}ms, {'✓' if ok else '✗'} для {mac[:8]}***")
     return utf8_json_response({"ok": ok})
 
 
 @app.get("/", response_class=HTMLResponse)
-async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
-    return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id})
+async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01", cid: str = ""):
+    cid = (cid or make_cid())[:24]
+    logger.info(f"[welcome] cid={cid} mac={mac[:8]}*** router={router_id}")
+    return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id, "cid": cid})
 
 
-def _build_tariffs_response(request: Request, mac: str, router_id: str):
+def _build_tariffs_response(request: Request, mac: str, router_id: str, cid: str = ""):
     trial_ts = str(int(time.time()))
     trial_sig = make_trial_signature(mac, router_id, trial_ts)
     device_id, _ = get_or_create_device_id(request)
@@ -619,6 +654,7 @@ def _build_tariffs_response(request: Request, mac: str, router_id: str):
             "request": request,
             "mac": mac,
             "router_id": router_id,
+            "cid": (cid or "-")[:24],
             "trial_ts": trial_ts,
             "trial_sig": trial_sig,
             "trial_used": "true" if trial_used else "false",
@@ -631,17 +667,21 @@ def _build_tariffs_response(request: Request, mac: str, router_id: str):
 
 
 @app.get("/prepare_and_tariffs", response_class=HTMLResponse)
-async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "astana_01"):
+async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "astana_01", cid: str = ""):
     """Сначала готовим PAY_WINDOW, затем открываем тарифы.
 
     Для iPhone отдаём HTML сразу в этом же ответе (без дополнительного редиректа),
     чтобы убрать задержку на втором переходе в captive-сценарии.
     """
+    cid = (cid or make_cid())[:24]
+    logger.info(f"[prepare_and_tariffs] START cid={cid} mac={mac[:8]}*** router={router_id}")
+
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return templates.TemplateResponse("welcome.html", {
             "request": request,
             "mac": mac,
             "router_id": router_id,
+            "cid": cid,
             "error": "Некорректный MAC",
         })
     if router_id not in ROUTERS_CONFIG:
@@ -649,6 +689,7 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
             "request": request,
             "mac": mac,
             "router_id": router_id,
+            "cid": cid,
             "error": "Неизвестный роутер",
         })
 
@@ -656,17 +697,17 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
     try:
         ok = await asyncio.wait_for(
             asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
-            timeout=6,
+            timeout=PREPARE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
-        logger.error(f"[prepare_and_tariffs] TIMEOUT >6s для {mac[:8]}*** ({router_id})")
+        logger.error(f"[prepare_and_tariffs] TIMEOUT cid={cid} >{PREPARE_TIMEOUT_SECONDS}s для {mac[:8]}*** ({router_id})")
         return utf8_json_response(
             {"ok": False, "error": "Роутер отвечает слишком долго. Повторите через пару секунд."},
             status_code=504,
         )
 
     if not ok:
-        logger.error(f"[prepare_and_tariffs] PAY_WINDOW не создан для {mac[:8]}*** ({router_id})")
+        logger.error(f"[prepare_and_tariffs] PAY_WINDOW FAIL cid={cid} для {mac[:8]}*** ({router_id})")
         return utf8_json_response(
             {"ok": False, "error": "Не удалось подготовить доступ. Повторите попытку."},
             status_code=502,
@@ -688,17 +729,36 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
     is_ios = bool(re.search(r"iPad|iPhone|iPod", user_agent, re.IGNORECASE))
 
     if is_ios:
-        logger.info(f"[prepare_and_tariffs] iOS direct HTML, total: {total_ms:.0f}ms для {mac[:8]}***")
-        return _build_tariffs_response(request, mac, router_id)
+        logger.info(f"[prepare_and_tariffs] iOS direct HTML cid={cid}, total: {total_ms:.0f}ms для {mac[:8]}***")
+        return _build_tariffs_response(request, mac, router_id, cid)
 
-    logger.info(f"[prepare_and_tariffs] redirect -> /tariffs, total: {total_ms:.0f}ms для {mac[:8]}***")
-    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
+    logger.info(f"[prepare_and_tariffs] redirect cid={cid} -> /tariffs, total: {total_ms:.0f}ms для {mac[:8]}***")
+    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
     return RedirectResponse(url=tariff_url, status_code=303)
 
 
 @app.get("/tariffs", response_class=HTMLResponse)
-async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
-    return _build_tariffs_response(request, mac, router_id)
+async def tariffs(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01", cid: str = ""):
+    cid = (cid or make_cid())[:24]
+    logger.info(f"[tariffs] cid={cid} mac={mac[:8]}*** router={router_id}")
+    return _build_tariffs_response(request, mac, router_id, cid)
+
+
+@app.post("/client_event")
+async def client_event(request: Request):
+    """Сервисный endpoint для диагностики клиентских шагов (loading, click, nav)."""
+    try:
+        data = await request.json()
+    except Exception:
+        return utf8_json_response({"ok": False, "error": "invalid json"}, status_code=400)
+
+    cid = str(data.get("cid") or "-")[:24]
+    stage = str(data.get("stage") or "-")[:64]
+    page = str(data.get("page") or "-")[:64]
+    elapsed_ms = data.get("elapsed_ms")
+    extra = data.get("extra")
+    logger.info(f"[CLIENT] cid={cid} page={page} stage={stage} elapsed_ms={elapsed_ms} extra={extra}")
+    return utf8_json_response({"ok": True})
 
 
 @app.get("/health")
@@ -863,7 +923,9 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 
 
 @app.get("/start_payment")
-async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01"):
+async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01", cid: str = ""):
+    cid = (cid or "-")[:24]
+    logger.info(f"[start_payment] START cid={cid} amount={amount} mac={mac[:8]}*** router={router_id}")
     if amount not in[100, 200, 490, 990, 2490]:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
@@ -885,7 +947,8 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     finally:
         conn.close()
 
-    payment_url = build_payment_url(amount, mac, router_id, payment_order_id)
+    payment_url = build_payment_url(amount, mac, router_id, payment_order_id, cid)
+    logger.info(f"[start_payment] REDIRECT cid={cid} order={payment_order_id} mac={mac[:8]}*** router={router_id}")
     return RedirectResponse(url=payment_url, status_code=302)
 
 
@@ -923,7 +986,10 @@ async def get_free_trial(
     router_id: str = Form(...),
     trial_ts: str = Form(""),
     trial_sig: str = Form(""),
+    cid: str = Form(""),
 ):
+    cid = (cid or "-")[:24]
+    logger.info(f"[get_free_trial] START cid={cid} mac={mac[:8]}*** router={router_id}")
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
 
@@ -996,8 +1062,9 @@ async def payment_result(request: Request):
     try:
         form_data = await request.form()
         params = dict(form_data)
+        cid = (params.get('cid') or params.get('pg_param3') or '-')[:24]
 
-        logger.info(f"[payment_result] Callback от FreedomPay: order_id={params.get('pg_order_id')}, amount={params.get('pg_amount')} ₸")
+        logger.info(f"[payment_result] Callback cid={cid} order_id={params.get('pg_order_id')}, amount={params.get('pg_amount')} ₸")
 
         if params.get('pg_sig') != get_signature("payment_result", params, SECRET_KEY):
             logger.error(f"[payment_result] ❌ НЕВАЛИДНАЯ ПОДПИСЬ от FreedomPay")
