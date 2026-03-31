@@ -609,9 +609,12 @@ def _build_tariffs_response(request: Request, mac: str, router_id: str):
     trial_sig = make_trial_signature(mac, router_id, trial_ts)
     device_id, _ = get_or_create_device_id(request)
     trial_used = check_trial_used_last_24h(mac, device_id)
+    user_agent = (request.headers.get("user-agent") or "")
+    is_ios = bool(re.search(r"iPad|iPhone|iPod", user_agent, re.IGNORECASE))
+    template_name = "index_ios_light.html" if is_ios else "index.html"
 
     response = templates.TemplateResponse(
-        "index.html",
+        template_name,
         {
             "request": request,
             "mac": mac,
@@ -629,7 +632,11 @@ def _build_tariffs_response(request: Request, mac: str, router_id: str):
 
 @app.get("/prepare_and_tariffs", response_class=HTMLResponse)
 async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "astana_01"):
-    """Один запрос: сначала готовим PAY_WINDOW, затем сразу отдаём HTML тарифов без второго перехода."""
+    """Сначала готовим PAY_WINDOW, затем открываем тарифы.
+
+    Для iPhone отдаём HTML сразу в этом же ответе (без дополнительного редиректа),
+    чтобы убрать задержку на втором переходе в captive-сценарии.
+    """
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
         return templates.TemplateResponse("welcome.html", {
             "request": request,
@@ -676,8 +683,17 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
     finally:
         conn.close()
 
-    logger.info(f"[prepare_and_tariffs] total: {(time.monotonic()-t_start)*1000:.0f}ms для {mac[:8]}***")
-    return _build_tariffs_response(request, mac, router_id)
+    total_ms = (time.monotonic() - t_start) * 1000
+    user_agent = (request.headers.get("user-agent") or "")
+    is_ios = bool(re.search(r"iPad|iPhone|iPod", user_agent, re.IGNORECASE))
+
+    if is_ios:
+        logger.info(f"[prepare_and_tariffs] iOS direct HTML, total: {total_ms:.0f}ms для {mac[:8]}***")
+        return _build_tariffs_response(request, mac, router_id)
+
+    logger.info(f"[prepare_and_tariffs] redirect -> /tariffs, total: {total_ms:.0f}ms для {mac[:8]}***")
+    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
+    return RedirectResponse(url=tariff_url, status_code=303)
 
 
 @app.get("/tariffs", response_class=HTMLResponse)
