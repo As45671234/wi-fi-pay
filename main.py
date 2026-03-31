@@ -710,14 +710,9 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
         logger.error(f"[start_payment] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    logger.info(f"[start_payment] Активирую PAY_WINDOW на 3 мин для {mac[:8]}*** на {router_id}")
-    if not await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes=3, mode="PAY_WINDOW"):
-        logger.error(f"[start_payment] ❌ ОШИБКА: PAY_WINDOW не активирован для {mac[:8]}*** на {router_id}")
-        return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
+    logger.info(f"[start_payment] Обновляю PAY_WINDOW фоново для {mac[:8]}*** на {router_id}")
+    asyncio.create_task(asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes=3, mode="PAY_WINDOW"))
 
-    logger.info(f"[start_payment] ✓ PAY_WINDOW активирован, инициирую платеж на {amount} ₸")
-    logger.info(f"[start_payment] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
-    
     payment_order_id = str(int(time.time() * 1000))
     conn = get_db()
     try:
