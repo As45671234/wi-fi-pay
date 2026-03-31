@@ -709,42 +709,17 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
         logger.error(f"[activate_welcome] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    logger.info(f"[activate_welcome] User-Agent: {request.headers.get('user-agent')}, MAC: {mac[:8]}***")
-
     user_agent = (request.headers.get("user-agent") or "").lower()
-    is_android = "android" in user_agent
-    is_ios = any(device in user_agent for device in["iphone", "ipad", "ipod"])
+    is_ios = any(d in user_agent for d in ["iphone", "ipad", "ipod"])
+    minutes = 1 if is_ios else 3
+    seconds = 90 if is_ios else None
 
-    if is_android:
-        logger.info(f"[activate_welcome] 🤖 Android → редирект на /tariffs БЕЗ доступа (captive portal закроется сразу)")
-        tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
-        return RedirectResponse(url=tariff_url, status_code=302)
-
-    if is_ios:
-        logger.info(f"[activate_welcome] 🍎 iOS → активирую PAY_WINDOW на 90 секунд")
-        granted = await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes=1, mode="PAY_WINDOW", seconds=90)
-        logger.info(f"[activate_welcome] iOS результат: {'✓ успех' if granted else '❌ ошибка'}")
-    else:
-        logger.info(f"[activate_welcome] 💻 Другое устройство → активирую PAY_WINDOW на 3 минуты")
-        granted = await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes=3, mode="PAY_WINDOW")
-        logger.info(f"[activate_welcome] Результат: {'✓ успех' if granted else '❌ ошибка'}")
-
-    if not granted:
-        logger.error(f"[activate_welcome] ❌ ОШИБКА: PAY_WINDOW не активирован для {mac[:8]}*** на {router_id}")
-        return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
-
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id) VALUES (?, 0, 'PAY_WINDOW', ?)",
-            (mac, router_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    logger.info(f"[activate_welcome] ✅ УСПЕХ: PAY_WINDOW активирован, редирект на /tariffs")
-    logger.info(f"[activate_welcome] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
+    # Запускаем PAY_WINDOW фоново — не ждём, редиректим сразу.
+    # К моменту нажатия «ОПЛАТИТЬ» MikroTik уже успеет отработать.
+    asyncio.create_task(asyncio.to_thread(
+        set_mikrotik_ah_access, mac, router_id, minutes, "PAY_WINDOW", seconds
+    ))
+    logger.info(f"[activate_welcome] PAY_WINDOW запущен фоново для {mac[:8]}*** ({router_id})")
 
     tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
     return RedirectResponse(url=tariff_url, status_code=302)
