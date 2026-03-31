@@ -88,6 +88,8 @@ def init_db():
         conn.execute("ALTER TABLE orders ADD COLUMN device_id TEXT")
     if 'payment_order_id' not in columns:
         conn.execute("ALTER TABLE orders ADD COLUMN payment_order_id TEXT")
+    if 'expires_at' not in columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN expires_at TIMESTAMP")
     conn.commit()
     conn.close()
 
@@ -478,6 +480,35 @@ def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: s
     params['pg_sig'] = get_signature("payment.php", params, SECRET_KEY)
     return f"{PAY_URL}?{urlencode(params)}"
 
+@app.get("/session_status")
+async def session_status(mac: str, router_id: str = "astana_01"):
+    """Возвращает статус сессии по MAC. Используется клиентом для поллинга."""
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        return utf8_json_response({"active": False, "expires_in": -1})
+    conn = get_db()
+    try:
+        row = conn.execute(
+            """SELECT status, expires_at FROM orders
+               WHERE mac_address=? AND router_id=? AND status IN ('PAY_WINDOW','TRIAL','PAID')
+               ORDER BY created_at DESC LIMIT 1""",
+            (mac, router_id)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return utf8_json_response({"active": False, "expires_in": -1})
+    status, expires_at_str = row
+    if status == 'PAID':
+        return utf8_json_response({"active": True, "expires_in": 86400})
+    if not expires_at_str:
+        return utf8_json_response({"active": True, "expires_in": -1})
+    try:
+        expires_at = datetime.fromisoformat(expires_at_str)
+        expires_in = int((expires_at - datetime.utcnow()).total_seconds())
+        return utf8_json_response({"active": expires_in > 0, "expires_in": expires_in})
+    except Exception:
+        return utf8_json_response({"active": False, "expires_in": -1})
+
 @app.get("/", response_class=HTMLResponse)
 async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id})
@@ -711,11 +742,22 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
 
     user_agent = (request.headers.get("user-agent") or "").lower()
     is_ios = any(d in user_agent for d in ["iphone", "ipad", "ipod"])
+    duration_sec = 90 if is_ios else 180
     minutes = 1 if is_ios else 3
     seconds = 90 if is_ios else None
 
+    expires_at = (datetime.utcnow() + timedelta(seconds=duration_sec)).isoformat()
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at) VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
+            (mac, router_id, expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
     # Запускаем PAY_WINDOW фоново — не ждём, редиректим сразу.
-    # К моменту нажатия «ОПЛАТИТЬ» MikroTik уже успеет отработать.
     asyncio.create_task(asyncio.to_thread(
         set_mikrotik_ah_access, mac, router_id, minutes, "PAY_WINDOW", seconds
     ))
@@ -775,11 +817,12 @@ async def get_free_trial(
     logger.info(f"[get_free_trial] ✓ TRIAL активирован на 15 минут для {mac[:8]}***")
     logger.info(f"[get_free_trial] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
     
+    trial_expires_at = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id, device_id) VALUES (?, 0, 'TRIAL', ?, ?)",
-            (mac, router_id, device_id),
+            "INSERT INTO orders (mac_address, amount, status, router_id, device_id, expires_at) VALUES (?, 0, 'TRIAL', ?, ?, ?)",
+            (mac, router_id, device_id, trial_expires_at),
         )
         conn.commit()
     finally:

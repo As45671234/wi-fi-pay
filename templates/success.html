@@ -106,6 +106,16 @@ const ROUTER_ID = "{{ router_id }}";
 const MINUTES = parseInt("{{ minutes }}", 10) || 60;
 const AMOUNT = parseInt("{{ amount }}", 10) || 0;
 
+const ua = navigator.userAgent || '';
+const isIOS = /iPad|iPhone|iPod/i.test(ua);
+const isAndroid = /android/i.test(ua);
+
+// URL куда редиректить при истечении сессии.
+// HTTP-запрос к этим адресам перехватывается MikroTik → login.html → wifi-pay.kz (captive portal).
+const captiveUrl = isIOS
+    ? 'http://captive.apple.com/hotspot-detect.html'
+    : 'http://connectivitycheck.gstatic.com/generate_204';
+
 // Названия тарифов
 function tariffName(minutes) {
     if (minutes >= 1440) return "Безлимит на день";
@@ -134,8 +144,7 @@ if (!expiryTs || expiryTs < Date.now()) {
     localStorage.setItem(storageKey, String(expiryTs));
 }
 
-const tariffUrl = `/tariffs?mac=${encodeURIComponent(MAC)}&router_id=${encodeURIComponent(ROUTER_ID)}`;
-document.getElementById('expiredBtn').href = tariffUrl;
+document.getElementById('expiredBtn').href = captiveUrl;
 
 function formatTime(ms) {
     if (ms <= 0) return "00:00:00";
@@ -146,6 +155,7 @@ function formatTime(ms) {
     return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
 }
 
+let expired = false;
 function tick() {
     const remaining = expiryTs - Date.now();
     const display = document.getElementById('timerDisplay');
@@ -160,6 +170,8 @@ function tick() {
     const timerLabel = document.getElementById('timerLabel');
 
     if (remaining <= 0) {
+        if (expired) return;
+        expired = true;
         // Session expired
         display.style.display = 'none';
         expiredDisplay.style.display = 'block';
@@ -170,11 +182,12 @@ function tick() {
         title.textContent = 'Время истекло';
         subtitle.textContent = 'Выберите новый тариф для продолжения';
         timerLabel.textContent = 'Сессия завершена';
-        hint.textContent = 'Нажмите кнопку ниже или откройте Wi-Fi — страница выбора тарифов откроется автоматически.';
+        hint.textContent = 'Нажмите кнопку ниже — откроется страница выбора тарифов.';
         localStorage.removeItem(storageKey);
 
-        // Auto-redirect after 5 seconds
-        setTimeout(() => { window.location.href = tariffUrl; }, 5000);
+        // Auto-redirect: на iOS/Android триггерим перехват MikroTik через HTTP,
+        // что заново откроет captive portal.
+        setTimeout(() => { window.location.href = captiveUrl; }, 5000);
         return;
     }
 
@@ -188,6 +201,30 @@ function tick() {
 }
 
 tick();
+
+// Серверный поллинг каждые 30 сек — синхронизирует таймер с сервером.
+// Если сервер говорит "expired" раньше клиентского таймера — форсируем истечение.
+setInterval(function() {
+    if (expired) return;
+    fetch('/session_status?mac=' + encodeURIComponent(MAC) + '&router_id=' + encodeURIComponent(ROUTER_ID))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.active && data.expires_in < 0) {
+                expiryTs = Date.now();  // форсируем tick
+            } else if (data.expires_in > 0) {
+                // Синхронизируем с сервером если расхождение > 30 сек
+                const clientRemaining = Math.floor((expiryTs - Date.now()) / 1000);
+                if (Math.abs(clientRemaining - data.expires_in) > 30) {
+                    expiryTs = Date.now() + data.expires_in * 1000;
+                    localStorage.setItem(storageKey, String(expiryTs));
+                }
+            }
+        })
+        .catch(function() {
+            // Сеть пропала → сессия истекла, форсируем
+            expiryTs = Date.now();
+        });
+}, 30000);
 </script>
 </body>
 </html>
