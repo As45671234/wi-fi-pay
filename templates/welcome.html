@@ -134,10 +134,14 @@
         // Android: мгновенный handoff в браузер БЕЗ загрузок и ожиданий.
         if (isAndroid) {
             event.preventDefault();
-            var absPrepareUrl = 'https://wifi-pay.kz/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress)
+            var preparePath = '/prepare_and_tariffs?mac=' + encodeURIComponent(macAddress)
                 + '&router_id=' + encodeURIComponent(routerId)
                 + '&cid=' + encodeURIComponent(cid);
-            window.location.replace(absPrepareUrl);
+            var fallbackUrl = 'https://wifi-pay.kz' + preparePath;
+            var intentUrl = 'intent://wifi-pay.kz' + preparePath
+                + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='
+                + encodeURIComponent(fallbackUrl) + ';end';
+            window.location.replace(intentUrl);
             return;
         }
 
