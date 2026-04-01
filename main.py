@@ -461,6 +461,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 t1 = time.monotonic()
                 binding = api.get_resource('/ip/hotspot/ip-binding')
                 user_res = api.get_resource('/ip/hotspot/user')
+                active = api.get_resource('/ip/hotspot/active')
                 sched = api.get_resource('/system/scheduler')
                 user_name = f"T-{mac.replace(':', '')}"
 
@@ -479,8 +480,30 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 for u in user_res.call('print', queries={'name': user_name}):
                     comment = (u.get('comment') or '')
                     if comment.startswith('PAID_') or comment.startswith('TRIAL_'):
-                        logger.info(f"PAY_WINDOW: уже есть user {comment} для {mac[:8]}***, пропускаем")
-                        return True
+                        # Считаем доступ реально защищенным только если есть active по MAC
+                        # или защищенный binding. Иначе это может быть "зависший" user.
+                        has_active = False
+                        has_protected_binding = False
+                        try:
+                            has_active = bool(active.call('print', queries={'mac-address': mac}))
+                        except Exception:
+                            has_active = False
+
+                        if not has_active:
+                            try:
+                                for pb in binding.call('print', queries={'mac-address': mac}):
+                                    pcomment = (pb.get('comment') or '')
+                                    if pcomment.startswith('PAID_') or pcomment.startswith('TRIAL_'):
+                                        has_protected_binding = True
+                                        break
+                            except Exception:
+                                has_protected_binding = False
+
+                        if has_active or has_protected_binding:
+                            logger.info(f"PAY_WINDOW: уже есть user {comment} для {mac[:8]}***, пропускаем")
+                            return True
+
+                        logger.info(f"PAY_WINDOW: найден stale user {comment} для {mac[:8]}***, продолжаем создание PAY_WINDOW")
 
                 logger.info(f"[MK] binding print+cleanup: {(time.monotonic()-t1)*1000:.0f}ms")
                 t2 = time.monotonic()
