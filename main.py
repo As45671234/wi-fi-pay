@@ -331,12 +331,25 @@ def _mikrotik_create_access(binding, active, user_res, host_res, mac, user_name,
                     pass
             time.sleep(0.35)
 
-        if access_mode != "ACTIVE":
+        # Для PAID всегда держим bypass binding как страховку.
+        # Это защищает iPhone-сценарий, когда active-сессия может исчезнуть,
+        # и гарантирует, что PAY_WINDOW не перетрёт уже оплаченный доступ.
+        paid_binding_exists = False
+        for b in binding.call('print', queries={'mac-address': mac}):
+            comment = (b.get('comment') or '')
+            if comment.startswith(f"{mode}_"):
+                paid_binding_exists = True
+                break
+
+        if not paid_binding_exists:
             try:
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"{mode}_{mac}"})
-                logger.info(f"Fallback: биндинг BYPASS добавлен для {mac[:8]}***")
+                if access_mode == "ACTIVE":
+                    logger.info(f"PAID страховка: добавлен BYPASS биндинг для {mac[:8]}***")
+                else:
+                    logger.info(f"Fallback: биндинг BYPASS добавлен для {mac[:8]}***")
             except Exception as e:
-                logger.error(f"❌ Ошибка fallback-биндинга для {mac}: {str(e)[:150]}")
+                logger.error(f"❌ Ошибка добавления BYPASS-биндинга для {mac}: {str(e)[:150]}")
 
 
 def _mikrotik_setup_scheduler(api, sched, mac, user_name, mode, seconds, minutes):
@@ -447,7 +460,12 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
             if mode == 'PAY_WINDOW':
                 t1 = time.monotonic()
                 binding = api.get_resource('/ip/hotspot/ip-binding')
+                user_res = api.get_resource('/ip/hotspot/user')
                 sched = api.get_resource('/system/scheduler')
+                user_name = f"T-{mac.replace(':', '')}"
+
+                # ВАЖНО: оплаченный доступ может быть как в ip-binding, так и в hotspot user.
+                # Если защищать только binding, PAY_WINDOW способен перетереть PAID/TRIAL у iPhone.
                 for b in binding.call('print', queries={'mac-address': mac}):
                     comment = (b.get('comment') or '')
                     if comment.startswith('PAID_') or comment.startswith('TRIAL_'):
@@ -457,11 +475,17 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                         binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
                     except Exception:
                         pass
+
+                for u in user_res.call('print', queries={'name': user_name}):
+                    comment = (u.get('comment') or '')
+                    if comment.startswith('PAID_') or comment.startswith('TRIAL_'):
+                        logger.info(f"PAY_WINDOW: уже есть user {comment} для {mac[:8]}***, пропускаем")
+                        return True
+
                 logger.info(f"[MK] binding print+cleanup: {(time.monotonic()-t1)*1000:.0f}ms")
                 t2 = time.monotonic()
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"PAY_WINDOW_{mac}"})
                 logger.info(f"[MK] binding add: {(time.monotonic()-t2)*1000:.0f}ms")
-                user_name = f"T-{mac.replace(':', '')}"
                 t3 = time.monotonic()
                 _mikrotik_setup_scheduler(api, sched, mac, user_name, "PAY_WINDOW", seconds, minutes)
                 logger.info(f"[MK] scheduler: {(time.monotonic()-t3)*1000:.0f}ms, PAY_WINDOW total: {(time.monotonic()-t0)*1000:.0f}ms")
