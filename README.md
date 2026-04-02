@@ -154,10 +154,10 @@ sudo systemctl restart wifi-pay
 - `GET /` — Welcome страница
 - `GET /tariffs?mac=XX:XX:XX&router_id=astana_01` — Выбор тарифов
 - `GET /activate_welcome?mac=XX:XX:XX&router_id=astana_01` — Активация PAY_WINDOW
-- `GET /start_payment?amount=200&mac=XX:XX:XX&router_id=astana_01` — Инициирование платежа
+- `GET /start_payment?amount=500&mac=XX:XX:XX&router_id=astana_01` — Инициирование платежа
 - `POST /payment_result` — Callback от FreedomPay (используется банком)
 - `POST /get_free_trial` — Trial доступ на 15 минут
-- `GET /success?mac=XX&router_id=astana_01&minutes=1440&amount=200` — Финальная страница
+- `GET /success?mac=XX&router_id=astana_01&minutes=1440&amount=500` — Финальная страница
 
 ### Для диагностики:
 
@@ -237,7 +237,7 @@ Captive Portal перенаправляет на http://wifi-pay.kz/
        + Проверка: не использовал последние 24ч?
        + Активирует TRIAL на 15 минут
   
-  2. "Безлимит на день" (200 ₸)         → /start_payment
+   2. "Безлимит на день" (500 ₸)         → /start_payment
        + Активирует PAY_WINDOW на 3 мин
        + Редирект на FreedomPay
 ```
