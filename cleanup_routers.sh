@@ -1,19 +1,29 @@
 #!/bin/bash
 # Скрипт для очистки всех MAC-адресов и сессий на роутерах
-# Использование: ./cleanup_routers.sh
+# Использование:
+#   ./cleanup_routers.sh                # очистить все роутеры
+#   ./cleanup_routers.sh astana_02      # очистить только один роутер
 
 set -e
 
+TARGET_ROUTER_ID="${1:-}"
+
 echo "╔════════════════════════════════════════════════════════════╗"
-echo "║      Очистка WiFi-Pay (все биндинги/юзеры/schedulers)    ║"
+if [ -n "$TARGET_ROUTER_ID" ]; then
+    echo "║  Очистка WiFi-Pay (роутер: $TARGET_ROUTER_ID)           ║"
+else
+    echo "║      Очистка WiFi-Pay (все биндинги/юзеры/schedulers)    ║"
+fi
 echo "╚════════════════════════════════════════════════════════════╝"
 
-python3 << 'CLEANUP_SCRIPT'
+python3 - "$TARGET_ROUTER_ID" << 'CLEANUP_SCRIPT'
 import json
 import sys
 import routeros_api
 import time
 import re
+
+target_router_id = (sys.argv[1] if len(sys.argv) > 1 else '').strip()
 
 try:
     with open('routers_config.json') as f:
@@ -21,6 +31,13 @@ try:
 except Exception as e:
     print(f"❌ Ошибка чтения routers_config.json: {e}")
     sys.exit(1)
+
+if target_router_id:
+    routers = [r for r in routers if r.get('id') == target_router_id]
+    if not routers:
+        print(f"❌ Роутер с id '{target_router_id}' не найден в routers_config.json")
+        sys.exit(1)
+    print(f"🔎 Выбран только роутер: {target_router_id}")
 
 for router in routers:
     router_id = router.get('id', 'unknown')
