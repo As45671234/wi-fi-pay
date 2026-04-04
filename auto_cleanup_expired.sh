@@ -191,7 +191,7 @@ with ThreadPoolExecutor(max_workers=4) as executor:
             else:
                 print(f"✗ {results['router_id']} ({results['router_ip']}): {results['status']}")
             
-            for msg in results['messages'][:3]:  # Только первые 3 сообщения
+            for msg in results['messages']:  # ВСЕ сообщения, не только первые 3
                 print(msg)
             
             total_checked += results['checked']
