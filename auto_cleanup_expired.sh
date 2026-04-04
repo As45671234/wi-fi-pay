@@ -36,9 +36,13 @@ import re
 from datetime import datetime
 import time
 import socket
+import signal
 
-# Таймаут 5 секунд для всех сокетов
-socket.setdefaulttimeout(5)
+# Обработчик таймаута
+def timeout_handler(signum, frame):
+    raise TimeoutError("Router connection timeout")
+
+signal.signal(signal.SIGALRM, timeout_handler)
 
 # Получаем флаг dry-run из аргумента
 DRY_RUN = sys.argv[1].lower() == 'true' if len(sys.argv) > 1 else True
@@ -87,7 +91,11 @@ for router in routers:
     
     print(f"\n🔍 Проверка {router_id} ({router_ip})...")
     
+    connection_ok = False
     try:
+        # Устанавливаем 5-секундный таймаут для подключения
+        signal.alarm(5)
+        
         connection = routeros_api.RouterOsApiPool(
             router_ip,
             username=router.get('user'),
@@ -96,7 +104,20 @@ for router in routers:
             plaintext_login=True,
         )
         api = connection.get_api()
+        signal.alarm(0)  # Отменяем таймаут после успешного подключения
+        connection_ok = True
         
+    except (socket.timeout, TimeoutError):
+        print(f"⏱️  Таймаут подключения — недоступен")
+    except Exception as e:
+        print(f"❌ Ошибка подключения: {str(e)[:80]}")
+    finally:
+        signal.alarm(0)  # Гарантированно отменяем таймаут
+    
+    if not connection_ok:
+        continue
+    
+    try:
         # Получаем время на роутере для контроля
         system = api.get_resource('/system/identity')
         identity = system.call('print')
@@ -207,12 +228,8 @@ for router in routers:
         
         print(f"  ► Итог: проверено {checked_count}, удалено {expired_count}")
         
-    except (socket.timeout, TimeoutError) as e:
-        print(f"⏱️  Таймаут подключения к {router_id} ({router_ip}:8728) — недоступен")
-        continue
     except Exception as e:
-        print(f"❌ Ошибка подключения к {router_id}: {str(e)[:80]}")
-        continue
+        print(f"❌ Ошибка обработки данных {router_id}: {str(e)[:80]}")
 
 print(f"\n════════════════════════════════════════════════════════════")
 if DRY_RUN:
