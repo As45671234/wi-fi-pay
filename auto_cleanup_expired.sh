@@ -90,7 +90,6 @@ for router in routers:
             password=router.get('pass'),
             port=router.get('port', 8728),
             plaintext_login=True,
-            timeout=5,  # Таймаут 5 секунд для подключения
         )
         api = connection.get_api()
         
