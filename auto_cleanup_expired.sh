@@ -96,7 +96,7 @@ def process_router(router):
                 ends_at_ts = parse_ends_at(ends_at_str)
                 
                 if ends_at_ts is None:
-                    results['messages'].append(f"  ℹ️  {mac} | пропущена (N/A)")
+                    results['messages'].append(f"  ℹ️  {mac} | пропущена (ends_at_str='{ends_at_str}')")
                     continue
                 
                 if ends_at_ts < current_timestamp:
