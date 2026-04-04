@@ -32,19 +32,10 @@ TIMESTAMP=$(date '+%s')
 import json
 import sys
 import routeros_api
-import re
 from datetime import datetime
-import time
-import socket
-import signal
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Обработчик таймаута
-def timeout_handler(signum, frame):
-    raise TimeoutError("Router connection timeout")
-
-signal.signal(signal.SIGALRM, timeout_handler)
-
-# Получаем флаг dry-run из аргумента
 DRY_RUN = sys.argv[1].lower() == 'true' if len(sys.argv) > 1 else True
 
 def parse_ends_at(ends_at_str):
@@ -52,50 +43,31 @@ def parse_ends_at(ends_at_str):
     if not ends_at_str or ends_at_str == 'N/A':
         return None
     try:
-        # Формат: "2026-04-04 15:20:19"
         dt = datetime.strptime(ends_at_str, "%Y-%m-%d %H:%M:%S")
         return int(dt.timestamp())
-    except Exception as e:
-        print(f"  ⚠️  Ошибка парсинга времени '{ends_at_str}': {e}")
+    except:
         return None
 
 def get_current_time_info():
     """Получает информацию о текущем времени на VPS"""
     now = datetime.now()
-    timestamp = int(now.timestamp())
-    return now.strftime("%Y-%m-%d %H:%M:%S"), timestamp
+    return now.strftime("%Y-%m-%d %H:%M:%S"), int(now.timestamp())
 
-current_time_str, current_timestamp = get_current_time_info()
-print(f"🕐 Текущее время VPS: {current_time_str} (timestamp: {current_timestamp})")
-
-# Режим работы
-if DRY_RUN:
-    print("⚠️  РЕЖИМ: DRY-RUN (только предпросмотр, без удалений!)")
-    print("    Используйте: --apply для реального удаления\n")
-else:
-    print("🔴 РЕЖИМ: РЕАЛЬНОГО УДАЛЕНИЯ ВКЛЮЧЕН!\n")
-
-try:
-    with open('routers_config.json') as f:
-        routers = json.load(f)
-except Exception as e:
-    print(f"❌ Ошибка чтения routers_config.json: {e}")
-    sys.exit(1)
-
-total_deleted = 0
-total_checked = 0
-
-for router in routers:
+def process_router(router):
+    """Обработать один роутер в отдельном потоке"""
     router_id = router.get('id', 'unknown')
     router_ip = router.get('ip', 'unknown')
     
-    print(f"\n🔍 Проверка {router_id} ({router_ip})...")
+    results = {
+        'router_id': router_id,
+        'router_ip': router_ip,
+        'checked': 0,
+        'deleted': 0,
+        'messages': [],
+        'status': 'ERROR'
+    }
     
-    connection_ok = False
     try:
-        # Устанавливаем 5-секундный таймаут для подключения
-        signal.alarm(5)
-        
         connection = routeros_api.RouterOsApiPool(
             router_ip,
             username=router.get('user'),
@@ -104,25 +76,8 @@ for router in routers:
             plaintext_login=True,
         )
         api = connection.get_api()
-        signal.alarm(0)  # Отменяем таймаут после успешного подключения
-        connection_ok = True
         
-    except (socket.timeout, TimeoutError):
-        print(f"⏱️  Таймаут подключения — недоступен")
-    except Exception as e:
-        print(f"❌ Ошибка подключения: {str(e)[:80]}")
-    finally:
-        signal.alarm(0)  # Гарантированно отменяем таймаут
-    
-    if not connection_ok:
-        continue
-    
-    try:
-        # Получаем время на роутере для контроля
-        system = api.get_resource('/system/identity')
-        identity = system.call('print')
-        
-        # Получаем список IP-BINDINGS с нашими комментариями
+        current_time_str, current_timestamp = get_current_time_info()
         binding = api.get_resource('/ip/hotspot/ip-binding')
         bindings = binding.call('print')
         
@@ -136,106 +91,120 @@ for router in routers:
             binding_id = b.get('id') or b.get('.id')
             ends_at_str = b.get('ends-at', 'N/A')
             
-            # Проверяем только наши биндинги
             if any(x in comment for x in ['PAY_WINDOW_', 'TRIAL_', 'PAID_']):
                 checked_count += 1
-                total_checked += 1
-                
                 ends_at_ts = parse_ends_at(ends_at_str)
                 
                 if ends_at_ts is None:
-                    # Если нет времени окончания или N/A, пропускаем (это может быть bypassed)
-                    print(f"  ℹ️  {mac} | {comment} | Ends at: {ends_at_str} (пропущена)")
+                    results['messages'].append(f"  ℹ️  {mac} | пропущена (N/A)")
                     continue
                 
-                # КРИТИЧНА ПРОВЕРКА: только если ДЕЙСТВИТЕЛЬНО истекло
                 if ends_at_ts < current_timestamp:
                     expired_count += 1
-                    total_deleted += 1
                     expired_macs.add(mac)
                     
-                    # Удаляем IP-BINDING (или показываем в dry-run)
                     if not DRY_RUN:
                         try:
                             binding.call('remove', arguments={'.id': binding_id})
-                            print(f"  ✖️  УДАЛЕНА: {mac} | {comment} | было до {ends_at_str}")
+                            results['deleted'] += 1
                         except Exception as e:
-                            print(f"  ⚠️  Ошибка удаления {mac}: {str(e)[:60]}")
+                            results['messages'].append(f"  ⚠️  Ошибка {mac}: {str(e)[:40]}")
                     else:
-                        print(f"  [DRY] БУДЕТ УДАЛЕНА: {mac} | {comment} | истекла {ends_at_str}")
+                        results['deleted'] += 1
                 else:
-                    remaining = ends_at_ts - current_timestamp
-                    mins = remaining // 60
-                    print(f"  ✓ АКТИВНА: {mac} | осталось {mins}м | {ends_at_str}")
+                    remaining = (ends_at_ts - current_timestamp) // 60
+                    results['messages'].append(f"  ✓ {mac} | осталось {remaining}м")
         
-        # Если были истекшие, удаляем связанные ACTIVE сессии
-        if expired_macs:
-            print(f"\n  🧹 Очистка {len(expired_macs)} истекших: удаляю ACTIVE сессии...")
-            active = api.get_resource('/ip/hotspot/active')
-            active_sessions = active.call('print')
-            active_count = 0
-            for a in active_sessions:
-                mac = (a.get('mac-address') or '').upper()
-                if mac in expired_macs:
-                    if not DRY_RUN:
+        # Очистка ACTIVE/COOKIE/HOST
+        if expired_macs and not DRY_RUN:
+            try:
+                active = api.get_resource('/ip/hotspot/active')
+                for a in active.call('print'):
+                    if (a.get('mac-address') or '').upper() in expired_macs:
                         try:
                             active.call('remove', arguments={'.id': a.get('id') or a.get('.id')})
-                            active_count += 1
-                        except Exception as e:
+                        except:
                             pass
-                    else:
-                        active_count += 1
-            if active_count > 0:
-                print(f"     ✓ {'Удалено' if not DRY_RUN else '[DRY] Будет удалено'} {active_count} active сессий")
+            except:
+                pass
             
-            # Удаляем COOKIE
-            print(f"  🧹 Удаляю COOKIE ({len(expired_macs)} MAC)...")
-            cookie = api.get_resource('/ip/hotspot/cookie')
-            cookies = cookie.call('print')
-            cookie_count = 0
-            for c in cookies:
-                mac = (c.get('mac-address') or '').upper()
-                if mac in expired_macs:
-                    if not DRY_RUN:
+            try:
+                cookie = api.get_resource('/ip/hotspot/cookie')
+                for c in cookie.call('print'):
+                    if (c.get('mac-address') or '').upper() in expired_macs:
                         try:
                             cookie.call('remove', arguments={'.id': c.get('id') or c.get('.id')})
-                            cookie_count += 1
-                        except Exception as e:
+                        except:
                             pass
-                    else:
-                        cookie_count += 1
-            if cookie_count > 0:
-                print(f"     ✓ {'Удалено' if not DRY_RUN else '[DRY] Будет удалено'} {cookie_count} cookies")
+            except:
+                pass
             
-            # Удаляем HOST
-            print(f"  🧹 Удаляю HOST entries ({len(expired_macs)} MAC)...")
-            host = api.get_resource('/ip/hotspot/host')
-            hosts = host.call('print')
-            host_count = 0
-            for h in hosts:
-                mac = (h.get('mac-address') or '').upper()
-                if mac in expired_macs:
-                    if not DRY_RUN:
+            try:
+                host = api.get_resource('/ip/hotspot/host')
+                for h in host.call('print'):
+                    if (h.get('mac-address') or '').upper() in expired_macs:
                         try:
                             host.call('remove', arguments={'.id': h.get('id') or h.get('.id')})
-                            host_count += 1
-                        except Exception as e:
+                        except:
                             pass
-                    else:
-                        host_count += 1
-            if host_count > 0:
-                print(f"     ✓ {'Удалено' if not DRY_RUN else '[DRY] Будет удалено'} {host_count} host entries")
+            except:
+                pass
         
-        print(f"  ► Итог: проверено {checked_count}, удалено {expired_count}")
+        results['checked'] = checked_count
+        results['status'] = 'OK'
         
     except Exception as e:
-        print(f"❌ Ошибка обработки данных {router_id}: {str(e)[:80]}")
+        results['messages'].append(f"  ❌ {str(e)[:60]}")
+        results['status'] = 'ERROR'
+    
+    return results
+
+# MAIN
+current_time_str, current_timestamp = get_current_time_info()
+print(f"🕐 Текущее время VPS: {current_time_str}\n")
+
+if DRY_RUN:
+    print("⚠️  РЕЖИМ: DRY-RUN (без удалений!)\n")
+else:
+    print("🔴 РЕЖИМ: РЕАЛЬНОГО УДАЛЕНИЯ\n")
+
+try:
+    with open('routers_config.json') as f:
+        routers = json.load(f)
+except Exception as e:
+    print(f"❌ Ошибка чтения routers_config.json: {e}")
+    sys.exit(1)
+
+total_checked = 0
+total_deleted = 0
+
+# Обработка роутеров в ПАРАЛЛЕЛЬНЫХ потоках (макс 4 одновременно)
+with ThreadPoolExecutor(max_workers=4) as executor:
+    futures = {executor.submit(process_router, r): r for r in routers}
+    
+    for future in as_completed(futures, timeout=40):  # 40 сек на всё
+        try:
+            results = future.result(timeout=8)  # 8 сек на один роутер
+            
+            if results['status'] == 'OK':
+                print(f"✓ {results['router_id']} ({results['router_ip']}): {results['checked']} проверено, {results['deleted']} удалено")
+            else:
+                print(f"✗ {results['router_id']} ({results['router_ip']}): {results['status']}")
+            
+            for msg in results['messages'][:3]:  # Только первые 3 сообщения
+                print(msg)
+            
+            total_checked += results['checked']
+            total_deleted += results['deleted']
+            
+        except Exception as e:
+            print(f"  ⏱️  Таймаут: {str(e)[:50]}")
 
 print(f"\n════════════════════════════════════════════════════════════")
 if DRY_RUN:
-    print(f"📊 [DRY-RUN] Проверено {total_checked} записей, БУДЕТ удалено {total_deleted} истекших")
+    print(f"📊 [DRY-RUN] Проверено {total_checked}, БУДЕТ удалено {total_deleted}")
 else:
-    print(f"📊 Проверено {total_checked} записей, удалено {total_deleted} истекших")
+    print(f"📊 Проверено {total_checked}, удалено {total_deleted}")
 print(f"════════════════════════════════════════════════════════════\n")
 
 CLEANUP_SCRIPT
