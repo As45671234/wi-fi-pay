@@ -17,7 +17,9 @@ if [ "$1" = "--apply" ]; then
     DRY_RUN=false
 fi
 
-LOGFILE="/var/log/wifi-pay-cleanup.log"
+LOGDIR="$HOME/.local/log"
+mkdir -p "$LOGDIR"
+LOGFILE="$LOGDIR/wifi-pay-cleanup.log"
 NOW=$(date '+%Y-%m-%d %H:%M:%S')
 TIMESTAMP=$(date '+%s')
 
@@ -88,6 +90,7 @@ for router in routers:
             password=router.get('pass'),
             port=router.get('port', 8728),
             plaintext_login=True,
+            timeout=5,  # Таймаут 5 секунд для подключения
         )
         api = connection.get_api()
         
