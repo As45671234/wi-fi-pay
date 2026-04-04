@@ -35,6 +35,10 @@ import routeros_api
 import re
 from datetime import datetime
 import time
+import socket
+
+# Таймаут 5 секунд для всех сокетов
+socket.setdefaulttimeout(5)
 
 # Получаем флаг dry-run из аргумента
 DRY_RUN = sys.argv[1].lower() == 'true' if len(sys.argv) > 1 else True
@@ -203,6 +207,9 @@ for router in routers:
         
         print(f"  ► Итог: проверено {checked_count}, удалено {expired_count}")
         
+    except (socket.timeout, TimeoutError) as e:
+        print(f"⏱️  Таймаут подключения к {router_id} ({router_ip}:8728) — недоступен")
+        continue
     except Exception as e:
         print(f"❌ Ошибка подключения к {router_id}: {str(e)[:80]}")
         continue
