@@ -1047,72 +1047,11 @@ async def get_free_trial(
     cid: str = Form(""),
 ):
     cid = (cid or "-")[:24]
-    logger.info(f"[get_free_trial] START cid={cid} mac={mac[:8]}*** router={router_id}")
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
-        return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
-
-    if router_id not in ROUTERS_CONFIG:
-        logger.error(f"[get_free_trial] Неизвестный router_id: {router_id}")
-        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
-
-    logger.info(f"[get_free_trial] Запрос TRIAL для {mac[:8]}*** на {router_id}")
-
-    if is_trial_rate_limited(request):
-        logger.warning(f"[get_free_trial] ⚠️ RATE LIMIT для IP {get_client_ip(request)}")
-        return utf8_json_response({"error": "Слишком много попыток. Подождите 10 минут и повторите."}, status_code=429)
-
-    if not is_valid_trial_signature(mac, router_id, trial_ts, trial_sig):
-        logger.warning(f"[get_free_trial] ❌ Невалидная подпись для {mac[:8]}***")
-        return utf8_json_response({"error": "Сессия истекла. Обновите страницу и попробуйте снова."}, status_code=400)
-
-    device_id, is_new_device_id = get_or_create_device_id(request)
-
-    if check_trial_used_last_24h(mac, device_id):
-        logger.info(f"[get_free_trial] Trial уже использован за 24ч для {mac[:8]}*** (device_id: {device_id[:8]}***)")
-        blocked = utf8_json_response({"error": "Бесплатный доступ уже использован. Повторно можно через 24 часа."}, status_code=403)
-        if is_new_device_id:
-            blocked.set_cookie(
-                key="wf_device_id",
-                value=device_id,
-                max_age=60 * 60 * 24 * 365,
-                httponly=True,
-                secure=True,
-                samesite="lax",
-                path="/",
-            )
-        return blocked
-
-    logger.info(f"[get_free_trial] ✓ Все проверки пройдены, активирую TRIAL на 15 минут для {mac[:8]}***")
-    if not await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes=15, mode="TRIAL"):
-        logger.error(f"[get_free_trial] ❌ Ошибка активации TRIAL для {mac[:8]}*** на {router_id}")
-        return utf8_json_response({"error": "Ошибка активации доступа"}, status_code=500)
-    
-    logger.info(f"[get_free_trial] ✓ TRIAL активирован на 15 минут для {mac[:8]}***")
-    logger.info(f"[get_free_trial] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
-    
-    trial_expires_at = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id, device_id, expires_at) VALUES (?, 0, 'TRIAL', ?, ?, ?)",
-            (mac, router_id, device_id, trial_expires_at),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    response = JSONResponse({"message": "15 минут активировано! Нажмите 'Готово' и пользуйтесь."})
-    if is_new_device_id:
-        response.set_cookie(
-            key="wf_device_id",
-            value=device_id,
-            max_age=60 * 60 * 24 * 365,
-            httponly=True,
-            secure=True,
-            samesite="lax",
-            path="/",
-        )
-    return response
+    logger.info(f"[get_free_trial] DISABLED cid={cid} mac={mac[:8]}*** router={router_id}")
+    return utf8_json_response(
+        {"error": "Бесплатный доступ временно отключен"},
+        status_code=403,
+    )
 
 
 @app.post("/payment_result")

@@ -25,14 +25,6 @@
         
         .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
         .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
-        .trial-success { display: none; margin-top: 1rem; border: 1px solid #bfdbfe; border-radius: 1rem; background: #eff6ff; color: #1e3a8a; padding: 1rem; text-align: left; }
-        .trial-success-title { font-weight: 700; margin-bottom: 0.35rem; }
-        .trial-success-text { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.8rem; }
-        .trial-notice { display: none; margin-top: 0.9rem; border-radius: 1rem; padding: 0.9rem 1rem; text-align: left; }
-        .trial-notice.warn { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
-        .trial-notice.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-        .trial-notice-title { font-size: 0.92rem; font-weight: 700; margin-bottom: 0.2rem; }
-        .trial-notice-text { font-size: 0.86rem; line-height: 1.3; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
         
@@ -56,14 +48,9 @@
             </svg>
         </div>
         <h1>Высокоскоростной Wi-Fi</h1>
-        <p class="desc">Выберите время доступа и оплатите картой любого банка</p>
+        <p class="desc">Выберите тариф и оплатите картой любого банка</p>
 
         <div class="tariff-list">
-            <!-- 15 минут бесплатно -->
-            <div onclick="selectT(0, this)" class="tariff-card">
-                <span class="t-name">15 минут бесплатно</span>
-                <span class="t-price">0 ₸</span>
-            </div>
             <!-- Безлимит на день со скидкой -->
             <div onclick="selectT(500, this)" class="tariff-card" style="border-color: #f59e0b; background: #fffbeb; position: relative;">
                 <div style="position: absolute; top: -10px; right: 12px; background: #ef4444; color: white; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: 0.05em;">−75%</div>
@@ -77,15 +64,6 @@
 
         <div id="pay-btn-area">
             <button class="btn" id="main-pay-btn" onclick="payNow()" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</button>
-            <button class="btn" id="trial-btn" onclick="getTrial()" style="display: none;">ПОЛУЧИТЬ 15 МИНУТ БЕСПЛАТНО</button>
-            <div id="trial-success" class="trial-success">
-                <div class="trial-success-title">Доступ открыт на 15 минут</div>
-                <div class="trial-success-text">Нажмите «Готово» вверху справа и продолжайте пользоваться интернетом.</div>
-            </div>
-            <div id="trial-notice" class="trial-notice">
-                <div id="trial-notice-title" class="trial-notice-title"></div>
-                <div id="trial-notice-text" class="trial-notice-text"></div>
-            </div>
         </div>
         
         <div class="mac-id">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
@@ -113,9 +91,6 @@
     const macAddress = urlParams.get('mac') || "{{ mac }}";
     const routerId = urlParams.get('router_id') || "{{ router_id }}";
     const cid = urlParams.get('cid') || "{{ cid }}";
-    const trialTs = "{{ trial_ts }}";
-    const trialSig = "{{ trial_sig }}";
-    const trialUsed = {{ trial_used }};
     const userAgent = navigator.userAgent || '';
     const isAndroid = /android/i.test(userAgent);
     const isIOS = /iPad|iPhone|iPod/i.test(userAgent);
@@ -152,30 +127,9 @@
         
         const btnArea = document.getElementById('pay-btn-area');
         const payBtn = document.getElementById('main-pay-btn');
-        const trialBtn = document.getElementById('trial-btn');
-        const trialSuccess = document.getElementById('trial-success');
-        const trialNotice = document.getElementById('trial-notice');
         btnArea.style.display = 'block';
-        trialSuccess.style.display = 'none';
-        trialNotice.style.display = 'none';
-
-        if (amount === 0) {
-            if (trialUsed) {
-                trialBtn.style.display = 'none';
-                payBtn.style.display = 'none';
-                trialNotice.className = 'trial-notice warn';
-                document.getElementById('trial-notice-title').textContent = 'Бесплатный доступ уже использован';
-                document.getElementById('trial-notice-text').textContent = 'Повторно можно через 24 часа. Выберите платный тариф.';
-                trialNotice.style.display = 'block';
-            } else {
-                trialBtn.style.display = 'block';
-                payBtn.style.display = 'none';
-            }
-        } else {
-            trialBtn.style.display = 'none';
-            payBtn.style.display = 'block';
-            payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
-        }
+        payBtn.style.display = 'block';
+        payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
     }
 
     async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -225,56 +179,6 @@
         document.body.removeChild(link);
     }
 
-    async function getTrial() {
-        const t0 = Date.now();
-        logClient('trial_clicked', 0, 'start');
-        const btn = document.getElementById('trial-btn');
-        const successBox = document.getElementById('trial-success');
-        const notice = document.getElementById('trial-notice');
-        const noticeTitle = document.getElementById('trial-notice-title');
-        const noticeText = document.getElementById('trial-notice-text');
-        btn.disabled = true;
-        successBox.style.display = 'none';
-        notice.style.display = 'none';
-
-        function showTrialNotice(kind, title, text) {
-            notice.className = `trial-notice ${kind}`;
-            noticeTitle.textContent = title;
-            noticeText.textContent = text;
-            notice.style.display = 'block';
-        }
-
-        const fd = new FormData();
-        fd.append('mac', macAddress);
-        fd.append('router_id', routerId);
-        fd.append('trial_ts', trialTs);
-        fd.append('trial_sig', trialSig);
-        fd.append('cid', cid);
-
-        try {
-            const response = await fetchWithTimeout('/get_free_trial', { method: 'POST', body: fd }, 9000);
-            const data = await response.json();
-
-            if (response.ok) {
-                logClient('trial_ok', Date.now() - t0, 'activated');
-                successBox.style.display = 'block';
-                btn.innerText = '15 МИНУТ АКТИВИРОВАНО';
-            } else {
-                logClient('trial_fail_http', Date.now() - t0, 'status=' + response.status);
-                if (response.status === 403) {
-                    showTrialNotice('warn', 'Лимит бесплатного доступа', data.error || 'Этот тариф можно включать только 1 раз в 24 часа.');
-                } else {
-                    showTrialNotice('error', 'Не удалось включить 15 минут', data.error || 'Роутер не ответил. Попробуйте еще раз.');
-                }
-                btn.disabled = false;
-            }
-        } catch (e) {
-            logClient('trial_fail_network', Date.now() - t0, 'timeout_or_network');
-            showTrialNotice('error', 'Ошибка подключения', 'Роутер не ответил. Проверьте Wi-Fi и попробуйте еще раз.');
-            btn.disabled = false;
-        }
-    }
-
     window.onpageshow = function(event) {
         const payBtn = document.getElementById('main-pay-btn');
         if (payBtn) {
@@ -282,11 +186,6 @@
             payBtn.innerText = selectedAmt > 0
                 ? `ОПЛАТИТЬ ${selectedAmt} ₸ И ПОЛУЧИТЬ ДОСТУП`
                 : "ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП";
-        }
-
-        const trialBtn = document.getElementById('trial-btn');
-        if (trialBtn) {
-            trialBtn.disabled = false;
         }
     };
 </script>
