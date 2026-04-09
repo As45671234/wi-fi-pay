@@ -191,6 +191,27 @@ sudo systemctl restart wifi-pay
     "user": "admin",
     "pass": "your_password_here",
     "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
+   },
+   {
+      "id": "astana_07",
+      "ip": "10.0.0.8",
+      "user": "admin",
+      "pass": "your_password_here",
+      "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
+   },
+   {
+      "id": "astana_08",
+      "ip": "10.0.0.9",
+      "user": "admin",
+      "pass": "your_password_here",
+      "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
+   },
+   {
+      "id": "astana_09",
+      "ip": "10.0.0.10",
+      "user": "admin",
+      "pass": "your_password_here",
+      "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
   }
 ]
 ```
