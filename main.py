@@ -984,7 +984,7 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01", cid: str = ""):
     cid = (cid or "-")[:24]
     logger.info(f"[start_payment] START cid={cid} amount={amount} mac={mac[:8]}*** router={router_id}")
-    if amount not in[100, 500, 990, 2490]:
+    if amount not in [500, 1000, 1500]:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
