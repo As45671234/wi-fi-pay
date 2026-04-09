@@ -576,8 +576,10 @@ def decode_nested_url_value(value: str) -> str:
         decoded = next_value
     return decoded
 
+AMOUNT_TO_MINUTES = {500: 60, 1000: 180, 1500: 1440}
+
 def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str, cid: str = "") -> str:
-    minutes = 1440
+    minutes = AMOUNT_TO_MINUTES.get(amount, 60)
     cid = (cid or make_cid())[:24]
     success_url = (
         f"https://wifi-pay.kz/success"
@@ -1107,7 +1109,7 @@ async def payment_result(request: Request):
                 payment_order_id = payment_order_id or (row[2] or '')
 
         router_id = router_id or 'astana_01'
-        minutes = 1440
+        minutes = AMOUNT_TO_MINUTES.get(amount, 60)
         paid_expires_at = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat()
 
         logger.info(f"[payment_result] Активирую PAID на {minutes} минут для {mac[:8]}*** на {router_id}")
@@ -1135,7 +1137,7 @@ async def payment_result(request: Request):
                     (mac, amount, router_id, payment_order_id, paid_expires_at),
                 )
             conn.commit()
-            logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ обработано для {mac[:8]}*** на 24 часа ({minutes} минут)")
+            logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ обработано для {mac[:8]}*** на {minutes} минут")
             logger.info(f"[payment_result] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
         finally:
             conn.close()

@@ -116,7 +116,9 @@ const expiredRedirectUrl = tariffUrl;
 
 // Названия тарифов
 function tariffName(minutes) {
-    if (minutes >= 1440) return "Безлимит на день";
+    if (minutes >= 1440) return "Весь день";
+    if (minutes >= 180) return "3 часа";
+    if (minutes >= 60) return "1 час";
     return `${minutes} мин доступа`;
 }
 
