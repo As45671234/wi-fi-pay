@@ -48,6 +48,43 @@ def parse_ends_at(ends_at_str):
     except:
         return None
 
+def parse_scheduler_dt(date_str, time_str):
+    """Парсит дату/время из /system/scheduler start-date/start-time."""
+    if not date_str or not time_str:
+        return None
+    for fmt in ("%b/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(f"{date_str} {time_str}", fmt)
+        except ValueError:
+            try:
+                return datetime.strptime(f"{str(date_str).title()} {time_str}", fmt)
+            except ValueError:
+                continue
+    return None
+
+def scheduler_map(api):
+    """Индекс scheduler-задач del_<machex> -> timestamp окончания."""
+    result = {}
+    try:
+        sched = api.get_resource('/system/scheduler')
+        for task in sched.call('print'):
+            name = task.get('name', '')
+            if not name.startswith('del_'):
+                continue
+            mac_hex = name[4:].upper()
+            dt = parse_scheduler_dt(task.get('start-date', ''), task.get('start-time', ''))
+            if dt:
+                result[mac_hex] = {
+                    'ts': int(dt.timestamp()),
+                    'text': f"{task.get('start-date', '')} {task.get('start-time', '')}",
+                }
+    except Exception:
+        pass
+    return result
+
+def mac_to_hex(mac):
+    return (mac or '').replace(':', '').upper()
+
 def get_current_time_info():
     """Получает информацию о текущем времени на VPS"""
     now = datetime.now()
@@ -80,6 +117,7 @@ def process_router(router):
         current_time_str, current_timestamp = get_current_time_info()
         binding = api.get_resource('/ip/hotspot/ip-binding')
         bindings = binding.call('print')
+        sched_by_mac = scheduler_map(api)
         
         expired_macs = set()
         expired_count = 0
@@ -93,10 +131,18 @@ def process_router(router):
             
             if any(x in comment for x in ['PAY_WINDOW_', 'TRIAL_', 'PAID_']):
                 checked_count += 1
-                ends_at_ts = parse_ends_at(ends_at_str)
+                sched_info = sched_by_mac.get(mac_to_hex(mac))
+                if sched_info:
+                    ends_at_ts = sched_info['ts']
+                    ends_at_debug = sched_info['text']
+                    ends_src = 'scheduler'
+                else:
+                    ends_at_ts = parse_ends_at(ends_at_str)
+                    ends_at_debug = ends_at_str
+                    ends_src = 'ends-at'
                 
                 if ends_at_ts is None:
-                    results['messages'].append(f"  ℹ️  {mac} | пропущена (ends_at_str='{ends_at_str}')")
+                    results['messages'].append(f"  ℹ️  {mac} | пропущена ({ends_src}='{ends_at_debug}')")
                     continue
                 
                 if ends_at_ts < current_timestamp:
@@ -113,7 +159,7 @@ def process_router(router):
                         results['deleted'] += 1
                 else:
                     remaining = (ends_at_ts - current_timestamp) // 60
-                    results['messages'].append(f"  ✓ {mac} | осталось {remaining}м")
+                    results['messages'].append(f"  ✓ {mac} | осталось {remaining}м ({ends_src}: {ends_at_debug})")
         
         # Очистка ACTIVE/COOKIE/HOST
         if expired_macs and not DRY_RUN:
