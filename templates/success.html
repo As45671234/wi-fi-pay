@@ -105,6 +105,7 @@ const MAC = "{{ mac }}";
 const ROUTER_ID = "{{ router_id }}";
 const MINUTES = parseInt("{{ minutes }}", 10) || 60;
 const AMOUNT = parseInt("{{ amount }}", 10) || 0;
+const TARIFF_NAME_FROM_BACKEND = "{{ tariff_name }}";
 
 const ua = navigator.userAgent || '';
 const isIOS = /iPad|iPhone|iPod/i.test(ua);
@@ -130,7 +131,7 @@ function formatDevice(mac) {
     return mac ? mac.slice(0, 8) + "***" : "—";
 }
 
-document.getElementById('tariffName').textContent   = tariffName(MINUTES);
+document.getElementById('tariffName').textContent   = TARIFF_NAME_FROM_BACKEND || tariffName(MINUTES);
 document.getElementById('tariffAmount').textContent = tariffAmount(AMOUNT);
 document.getElementById('deviceId').textContent     = formatDevice(MAC);
 

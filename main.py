@@ -65,6 +65,7 @@ def utf8_json_response(content, status_code=200):
 # --- ЗАГРУЗКА КОНФИГА РОУТЕРОВ ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROUTERS_CONFIG_PATH = os.path.join(BASE_DIR, "routers_config.json")
+TARIFFS_CONFIG_PATH = os.path.join(BASE_DIR, "tariffs_config.json")
 
 if os.path.exists(ROUTERS_CONFIG_PATH):
     with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
@@ -72,6 +73,104 @@ if os.path.exists(ROUTERS_CONFIG_PATH):
     ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
 else:
     ROUTERS_CONFIG = {}
+
+
+def _hours_word(hours: int) -> str:
+    mod10 = hours % 10
+    mod100 = hours % 100
+    if mod10 == 1 and mod100 != 11:
+        return "час"
+    if mod10 in (2, 3, 4) and mod100 not in (12, 13, 14):
+        return "часа"
+    return "часов"
+
+
+def _default_tariff_title(minutes: int) -> str:
+    if minutes >= 1440:
+        return "До конца поездки"
+    if minutes % 60 == 0 and minutes >= 60:
+        h = minutes // 60
+        return f"{h} {_hours_word(h)} доступа"
+    return f"{minutes} минут доступа"
+
+
+def _default_tariff_subtitle(minutes: int) -> str:
+    if minutes >= 1440:
+        return "Максимум комфорта"
+    if minutes % 60 == 0 and minutes >= 60:
+        h = minutes // 60
+        return f"Доступ на {h} {_hours_word(h)}"
+    return f"Доступ на {minutes} минут"
+
+
+def _normalize_tariff(raw: dict) -> dict | None:
+    try:
+        amount = int(raw.get("amount"))
+        minutes = int(raw.get("minutes"))
+    except Exception:
+        return None
+
+    if amount <= 0 or minutes <= 0:
+        return None
+
+    title = (raw.get("title") or "").strip() or _default_tariff_title(minutes)
+    subtitle = (raw.get("subtitle") or "").strip() or _default_tariff_subtitle(minutes)
+    badge = (raw.get("badge") or "").strip()
+    return {
+        "amount": amount,
+        "minutes": minutes,
+        "title": title,
+        "subtitle": subtitle,
+        "badge": badge,
+    }
+
+
+def load_tariffs_config() -> list[dict]:
+    default = [
+        {"amount": 500, "minutes": 60, "title": "1 час доступа", "subtitle": "Час бесплатно¯", "badge": "Популярное"},
+        {"amount": 1000, "minutes": 180, "title": "3 часа доступа", "subtitle": "Час бесплатно* * * *", "badge": ""},
+        {"amount": 1500, "minutes": 1440, "title": "До конца поездки", "subtitle": "Час бесплатно *", "badge": "Выгодно!"},
+    ]
+
+    raw_items = default
+    if os.path.exists(TARIFFS_CONFIG_PATH):
+        try:
+            with open(TARIFFS_CONFIG_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list) and data:
+                raw_items = data
+        except Exception as e:
+            logger.warning(f"Не удалось прочитать tariffs_config.json, используем дефолт: {e}")
+
+    normalized = []
+    seen_amounts = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        t = _normalize_tariff(item)
+        if not t:
+            continue
+        if t["amount"] in seen_amounts:
+            continue
+        seen_amounts.add(t["amount"])
+        normalized.append(t)
+
+    if not normalized:
+        normalized = [
+            _normalize_tariff(x) for x in default
+            if _normalize_tariff(x) is not None
+        ]
+
+    normalized.sort(key=lambda x: x["amount"])
+    return normalized
+
+
+def get_tariff_runtime_state() -> tuple[list[dict], dict[int, int], dict[int, str], list[int]]:
+    tariffs = load_tariffs_config()
+    amount_to_minutes = {t["amount"]: t["minutes"] for t in tariffs}
+    amount_to_title = {t["amount"]: t["title"] for t in tariffs}
+    allowed_amounts = sorted(amount_to_minutes.keys())
+    return tariffs, amount_to_minutes, amount_to_title, allowed_amounts
 
 MERCHANT_ID = os.getenv("MERCHANT_ID", "581983")
 SECRET_KEY = os.getenv("SECRET_KEY", "PMwioQEEEOFbDBAu")
@@ -84,7 +183,11 @@ TRIAL_RATE_BUCKET = {}
 PREPARE_TIMEOUT_SECONDS = 10
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+else:
+    logger.warning(f"Static directory not found, skipping mount: {STATIC_DIR}")
 
 # --- БАЗА ДАННЫХ ---
 DB_PATH = os.path.join(BASE_DIR, 'gateway.db')
@@ -576,10 +679,9 @@ def decode_nested_url_value(value: str) -> str:
         decoded = next_value
     return decoded
 
-AMOUNT_TO_MINUTES = {500: 60, 1000: 180, 1500: 1440}
-
 def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: str, cid: str = "") -> str:
-    minutes = AMOUNT_TO_MINUTES.get(amount, 60)
+    _, amount_to_minutes, _, _ = get_tariff_runtime_state()
+    minutes = amount_to_minutes.get(amount, 60)
     cid = (cid or make_cid())[:24]
     success_url = (
         f"https://wifi-pay.kz/success"
@@ -691,6 +793,7 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
 
 
 def _build_tariffs_response(request: Request, mac: str, router_id: str, cid: str = ""):
+    tariffs, _, _, _ = get_tariff_runtime_state()
     trial_ts = str(int(time.time()))
     trial_sig = make_trial_signature(mac, router_id, trial_ts)
     device_id, _ = get_or_create_device_id(request)
@@ -706,6 +809,7 @@ def _build_tariffs_response(request: Request, mac: str, router_id: str, cid: str
             "trial_ts": trial_ts,
             "trial_sig": trial_sig,
             "trial_used": "true" if trial_used else "false",
+            "tariffs": tariffs,
         },
     )
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -986,7 +1090,8 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
 async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01", cid: str = ""):
     cid = (cid or "-")[:24]
     logger.info(f"[start_payment] START cid={cid} amount={amount} mac={mac[:8]}*** router={router_id}")
-    if amount not in [500, 1000, 1500]:
+    _, _, _, allowed_amounts = get_tariff_runtime_state()
+    if amount not in allowed_amounts:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
@@ -1109,7 +1214,8 @@ async def payment_result(request: Request):
                 payment_order_id = payment_order_id or (row[2] or '')
 
         router_id = router_id or 'astana_01'
-        minutes = AMOUNT_TO_MINUTES.get(amount, 60)
+        _, amount_to_minutes, _, _ = get_tariff_runtime_state()
+        minutes = amount_to_minutes.get(amount, 60)
         paid_expires_at = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat()
 
         logger.info(f"[payment_result] Активирую PAID на {minutes} минут для {mac[:8]}*** на {router_id}")
@@ -1158,12 +1264,15 @@ async def success(
 ):
     mac = decode_nested_url_value(mac)
     router_id = decode_nested_url_value(router_id)
+    _, _, amount_to_title, _ = get_tariff_runtime_state()
+    tariff_name = amount_to_title.get(amount, "")
     return templates.TemplateResponse("success.html", {
         "request": request,
         "mac": mac,
         "router_id": router_id,
         "minutes": minutes,
         "amount": amount,
+        "tariff_name": tariff_name,
     })
 
 if __name__ == "__main__":

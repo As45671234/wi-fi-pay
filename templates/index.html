@@ -122,87 +122,13 @@
         <h1>Высокоскоростной Wi-Fi</h1>
         <p class="desc">Выберите тариф и оплатите картой любого банка</p>
 
-        <div class="tariff-list">
-            <div onclick="selectT(500, this)" class="tariff-card">
-                <div class="tariff-top">
-                    <div class="t-left">
-                        <span class="t-icon">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="9"></circle>
-                                <polyline points="12 7 12 12 15 14"></polyline>
-                            </svg>
-                        </span>
-                        <div>
-                            <p class="t-name">1 час доступа</p>
-                            <p class="t-sub">Час бесплатно¯</p>
-                        </div>
-                    </div>
-                    <div class="t-right">
-                        <span class="t-badge">Популярное</span>
-                        <span class="t-price"><span class="num">500</span><span class="cur">₸</span></span>
-                    </div>
-                </div>
-            </div>
-            <div onclick="selectT(1000, this)" class="tariff-card">
-                <div class="tariff-top">
-                    <div class="t-left">
-                        <span class="t-icon">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="9"></circle>
-                                <polyline points="12 6 12 12 16 14"></polyline>
-                            </svg>
-                        </span>
-                        <div>
-                            <p class="t-name">3 часа доступа</p>
-                            <p class="t-sub">Час бесплатно* * * *</p>
-                        </div>
-                    </div>
-                    <div class="t-right">
-                        <span class="t-price pill"><span class="num">1000</span><span class="cur">₸</span></span>
-                    </div>
-                </div>
-            </div>
-            <div onclick="selectT(1500, this)" class="tariff-card">
-                <div class="tariff-top">
-                    <div class="t-left">
-                        <span class="t-icon">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="9"></circle>
-                                <polyline points="7 12 11 16 18 8"></polyline>
-                            </svg>
-                        </span>
-                        <div>
-                            <p class="t-name">До конца поездки</p>
-                            <p class="t-sub">Час бесплатно *</p>
-                        </div>
-                    </div>
-                    <div class="t-right">
-                        <span class="t-badge">Выгодно!</span>
-                        <span class="t-price pill-dark"><span class="num">1500</span><span class="cur">₸</span></span>
-                    </div>
-                </div>
-                <div class="selected-strip">
-                    <div class="selected-left">
-                        <span class="selected-check">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                        </span>
-                        <div>
-                            <p class="selected-name">До конца поездки</p>
-                            <p class="selected-sub">Бесплатно ★</p>
-                        </div>
-                    </div>
-                    <span class="selected-price"><span class="num">1500</span><span class="cur">₸</span></span>
-                </div>
-            </div>
-        </div>
+        <div class="tariff-list" id="tariff-list"></div>
 
         <div id="pay-btn-area">
             <button class="btn" id="main-pay-btn" onclick="payNow()" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</button>
         </div>
         
-        <div class="mac-id">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
+        <div class="mac-id">ID: <span id="mac-value">-</span> | ROUTER: <span id="router-value">-</span></div>
     </div>
 
     <!-- ФУТЕР -->
@@ -222,14 +148,139 @@
     
     let selectedAmt = -1;
 
+    // fallback-tariffs:start
+    const fallbackTariffs = [
+  {
+    "amount": 500,
+    "minutes": 120,
+    "title": "2 часа доступа",
+    "subtitle": "Доступ на 2 часа",
+    "badge": "Популярное"
+  },
+  {
+    "amount": 1000,
+    "minutes": 240,
+    "title": "4 часа доступа",
+    "subtitle": "Доступ на 4 часа",
+    "badge": ""
+  },
+  {
+    "amount": 1500,
+    "minutes": 1440,
+    "title": "До конца поездки",
+    "subtitle": "Час бесплатно *",
+    "badge": "Выгодно!"
+  }
+];
+    // fallback-tariffs:end
+    const jinjaVarStart = '{' + '{';
+    const jinjaBlockStart = '{' + '%';
+
+    function resolveTemplateValue(value, fallback = '') {
+        if (typeof value !== 'string') {
+            return fallback;
+        }
+        const trimmed = value.trim();
+        if (!trimmed || trimmed.includes(jinjaVarStart) || trimmed.includes(jinjaBlockStart)) {
+            return fallback;
+        }
+        return trimmed;
+    }
+
+    function resolveTemplateJson(raw, fallback) {
+        if (typeof raw !== 'string') {
+            return fallback;
+        }
+        const trimmed = raw.trim();
+        if (!trimmed || trimmed.includes(jinjaVarStart) || trimmed.includes(jinjaBlockStart)) {
+            return fallback;
+        }
+        try {
+            const parsed = JSON.parse(trimmed);
+            return Array.isArray(parsed) && parsed.length ? parsed : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function tariffIcon(minutes) {
+        if (minutes >= 1440) {
+            return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="7 12 11 16 18 8"></polyline></svg>';
+        }
+        return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline></svg>';
+    }
+
+    function priceClass(index, total) {
+        if (total >= 3 && index === total - 1) {
+            return 't-price pill-dark';
+        }
+        if (index === 1) {
+            return 't-price pill';
+        }
+        return 't-price';
+    }
+
+    function renderTariffs(tariffs) {
+        const list = document.getElementById('tariff-list');
+        list.innerHTML = tariffs.map((tariff, index) => {
+            const badgeHtml = tariff.badge ? `<span class="t-badge">${escapeHtml(tariff.badge)}</span>` : '';
+            const amount = Number(tariff.amount) || 0;
+            const minutes = Number(tariff.minutes) || 0;
+            return `
+                <div onclick="selectT(${amount}, this)" class="tariff-card">
+                    <div class="tariff-top">
+                        <div class="t-left">
+                            <span class="t-icon">${tariffIcon(minutes)}</span>
+                            <div>
+                                <p class="t-name">${escapeHtml(tariff.title)}</p>
+                                <p class="t-sub">${escapeHtml(tariff.subtitle)}</p>
+                            </div>
+                        </div>
+                        <div class="t-right">
+                            ${badgeHtml}
+                            <span class="${priceClass(index, tariffs.length)}"><span class="num">${escapeHtml(amount)}</span><span class="cur">₸</span></span>
+                        </div>
+                    </div>
+                    <div class="selected-strip">
+                        <div class="selected-left">
+                            <span class="selected-check">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                            </span>
+                            <div>
+                                <p class="selected-name">${escapeHtml(tariff.title)}</p>
+                                <p class="selected-sub">Выбранный тариф</p>
+                            </div>
+                        </div>
+                        <span class="selected-price"><span class="num">${escapeHtml(amount)}</span><span class="cur">₸</span></span>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
     // Получаем данные из URL (которые прислал MikroTik) или из шаблона
     const urlParams = new URLSearchParams(window.location.search);
-    const macAddress = urlParams.get('mac') || "{{ mac }}";
-    const routerId = urlParams.get('router_id') || "{{ router_id }}";
-    const cid = urlParams.get('cid') || "{{ cid }}";
+    const macAddress = urlParams.get('mac') || resolveTemplateValue("{{ mac }}", '00:00:00:00:00:00');
+    const routerId = urlParams.get('router_id') || resolveTemplateValue("{{ router_id }}", 'astana_01');
+    const cid = urlParams.get('cid') || resolveTemplateValue("{{ cid }}", 'local-preview');
+    const tariffs = resolveTemplateJson(`{{ tariffs | tojson | safe }}`, fallbackTariffs);
     const userAgent = navigator.userAgent || '';
     const isAndroid = /android/i.test(userAgent);
     const isIOS = /iPad|iPhone|iPod/i.test(userAgent);
+
+    renderTariffs(tariffs);
+    document.getElementById('mac-value').textContent = macAddress;
+    document.getElementById('router-value').textContent = routerId;
 
     function logClient(stage, elapsedMs, extra) {
         const payload = {
