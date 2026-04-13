@@ -13,12 +13,84 @@
         .desc { color: #9ca3af; font-size: 0.875rem; margin-bottom: 2rem; padding: 0 10px; line-height: 1.3; }
         
         .tariff-list { text-align: left; margin-bottom: 1.5rem; }
-        .tariff-card { cursor: pointer; border: 2px solid #f1f5f9; padding: 1.2rem; border-radius: 1.2rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s ease; }
+        .tariff-card { cursor: pointer; border: 2px solid #dbeafe; border-radius: 1.35rem; margin-bottom: 0.8rem; transition: all 0.2s ease; overflow: hidden; }
         .tariff-card:active { transform: scale(0.98); }
-        .tariff-card.active { border-color: #3b82f6; background-color: #f0f7ff; }
-        
-        .t-name { font-weight: 600; color: #374151; font-size: 0.95rem; }
-        .t-price { font-weight: 700; color: #111827; font-size: 1.1rem; }
+        .tariff-card.active { border-color: #60a5fa; background-color: #f8fbff; box-shadow: 0 12px 24px rgba(59,130,246,0.14); }
+
+        .tariff-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 0.95rem 1.05rem; }
+        .t-left { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+        .t-icon { width: 40px; height: 40px; border-radius: 999px; border: 2px solid #60a5fa; color: #3b82f6; display: flex; align-items: center; justify-content: center; background: #eff6ff; flex: 0 0 40px; }
+        .t-name { font-weight: 700; color: #1f2937; font-size: 0.96rem; margin: 0; }
+        .t-sub { margin: 2px 0 0; font-size: 0.76rem; color: #a3acb8; }
+        .t-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+        .t-badge { font-size: 0.62rem; font-weight: 700; color: #fff; background: #60a5fa; border-radius: 8px; padding: 2px 8px; text-transform: uppercase; letter-spacing: 0.03em; }
+        .t-price {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 0.18em;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-variant-numeric: tabular-nums lining-nums;
+            font-feature-settings: "tnum" 1, "lnum" 1;
+            line-height: 0.95;
+            color: #0f1b34;
+            text-rendering: geometricPrecision;
+            -webkit-font-smoothing: antialiased;
+        }
+        .t-price .num {
+            font-size: 1.52rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+        .t-price .cur {
+            font-size: 1.22rem;
+            font-weight: 700;
+            opacity: 0.95;
+        }
+        .t-price.pill {
+            background: linear-gradient(180deg, #5fa5ee, #3f81f0);
+            color: #ffffff;
+            border-radius: 12px;
+            padding: 7px 14px;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+        }
+        .t-price.pill-dark {
+            background: linear-gradient(180deg, #2b69b4, #1e4d8d);
+            color: #ffffff;
+            border-radius: 12px;
+            padding: 7px 14px;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+        }
+
+        .selected-strip { display: none; justify-content: space-between; align-items: center; gap: 8px; padding: 0.9rem 1.05rem; background: linear-gradient(125deg, #4cb6f6 0%, #4289eb 45%, #4f75e0 100%); color: #eaf6ff; border-top: 1px solid rgba(255,255,255,0.45); }
+        .selected-left { display: flex; align-items: center; gap: 10px; }
+        .selected-check { width: 34px; height: 34px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.75); display: flex; align-items: center; justify-content: center; }
+        .selected-name { margin: 0; font-size: 0.94rem; font-weight: 700; color: #f5fbff; }
+        .selected-sub { margin: 1px 0 0; font-size: 0.76rem; color: #d9efff; }
+        .selected-price {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 0.18em;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #ffffff;
+            background: linear-gradient(180deg, #1f5ca4, #1b477d);
+            border-radius: 12px;
+            padding: 7px 14px;
+            border: 1px solid rgba(255,255,255,0.35);
+            font-variant-numeric: tabular-nums lining-nums;
+            font-feature-settings: "tnum" 1, "lnum" 1;
+            line-height: 0.95;
+        }
+        .selected-price .num {
+            font-size: 1.52rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+        .selected-price .cur {
+            font-size: 1.22rem;
+            font-weight: 700;
+            opacity: 0.95;
+        }
+        .tariff-card.active .selected-strip { display: flex; }
         
         #pay-btn-area { display: none; border-top: 1px solid #f1f5f9; padding-top: 1.5rem; margin-top: 1rem; animation: fadeIn 0.3s ease; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -52,16 +124,77 @@
 
         <div class="tariff-list">
             <div onclick="selectT(500, this)" class="tariff-card">
-                <span class="t-name">1 час</span>
-                <span class="t-price">500 ₸</span>
+                <div class="tariff-top">
+                    <div class="t-left">
+                        <span class="t-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="9"></circle>
+                                <polyline points="12 7 12 12 15 14"></polyline>
+                            </svg>
+                        </span>
+                        <div>
+                            <p class="t-name">1 час доступа</p>
+                            <p class="t-sub">Час бесплатно¯</p>
+                        </div>
+                    </div>
+                    <div class="t-right">
+                        <span class="t-badge">Популярное</span>
+                        <span class="t-price"><span class="num">500</span><span class="cur">₸</span></span>
+                    </div>
+                </div>
             </div>
             <div onclick="selectT(1000, this)" class="tariff-card">
-                <span class="t-name">3 часа</span>
-                <span class="t-price">1000 ₸</span>
+                <div class="tariff-top">
+                    <div class="t-left">
+                        <span class="t-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="9"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                        </span>
+                        <div>
+                            <p class="t-name">3 часа доступа</p>
+                            <p class="t-sub">Час бесплатно* * * *</p>
+                        </div>
+                    </div>
+                    <div class="t-right">
+                        <span class="t-price pill"><span class="num">1000</span><span class="cur">₸</span></span>
+                    </div>
+                </div>
             </div>
             <div onclick="selectT(1500, this)" class="tariff-card">
-                <span class="t-name">Весь день</span>
-                <span class="t-price">1500 ₸</span>
+                <div class="tariff-top">
+                    <div class="t-left">
+                        <span class="t-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="9"></circle>
+                                <polyline points="7 12 11 16 18 8"></polyline>
+                            </svg>
+                        </span>
+                        <div>
+                            <p class="t-name">До конца поездки</p>
+                            <p class="t-sub">Час бесплатно *</p>
+                        </div>
+                    </div>
+                    <div class="t-right">
+                        <span class="t-badge">Выгодно!</span>
+                        <span class="t-price pill-dark"><span class="num">1500</span><span class="cur">₸</span></span>
+                    </div>
+                </div>
+                <div class="selected-strip">
+                    <div class="selected-left">
+                        <span class="selected-check">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </span>
+                        <div>
+                            <p class="selected-name">До конца поездки</p>
+                            <p class="selected-sub">Бесплатно ★</p>
+                        </div>
+                    </div>
+                    <span class="selected-price"><span class="num">1500</span><span class="cur">₸</span></span>
+                </div>
             </div>
         </div>
 
