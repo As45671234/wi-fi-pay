@@ -705,28 +705,36 @@ def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: s
 async def session_status(mac: str, router_id: str = "astana_01"):
     """Возвращает статус сессии по MAC. Используется клиентом для поллинга."""
     if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
-        return utf8_json_response({"active": False, "expires_in": -1})
+        return utf8_json_response({"active": False, "expires_in": -1, "status": "NONE"})
     conn = get_db()
     try:
         row = conn.execute(
             """SELECT status, expires_at FROM orders
                WHERE mac_address=? AND router_id=? AND status IN ('PAY_WINDOW','TRIAL','PAID')
-               ORDER BY created_at DESC LIMIT 1""",
+               ORDER BY
+                 CASE status
+                   WHEN 'PAID' THEN 0
+                   WHEN 'TRIAL' THEN 1
+                   WHEN 'PAY_WINDOW' THEN 2
+                   ELSE 3
+                 END,
+                 created_at DESC
+               LIMIT 1""",
             (mac, router_id)
         ).fetchone()
     finally:
         conn.close()
     if not row:
-        return utf8_json_response({"active": False, "expires_in": -1})
+        return utf8_json_response({"active": False, "expires_in": -1, "status": "NONE"})
     status, expires_at_str = row
     if not expires_at_str:
-        return utf8_json_response({"active": True, "expires_in": -1})
+        return utf8_json_response({"active": True, "expires_in": -1, "status": status})
     try:
         expires_at = datetime.fromisoformat(expires_at_str)
         expires_in = int((expires_at - datetime.utcnow()).total_seconds())
-        return utf8_json_response({"active": expires_in > 0, "expires_in": expires_in})
+        return utf8_json_response({"active": expires_in > 0, "expires_in": expires_in, "status": status})
     except Exception:
-        return utf8_json_response({"active": False, "expires_in": -1})
+        return utf8_json_response({"active": False, "expires_in": -1, "status": status})
 
 @app.post("/api/prepare_access")
 async def prepare_access(request: Request):

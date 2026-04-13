@@ -214,6 +214,13 @@ function syncFromServer() {
             if (data.expires_in > 0) {
                 const serverExpiryTs = Date.now() + data.expires_in * 1000;
                 const driftMs = Math.abs(expiryTs - serverExpiryTs);
+
+                // После успешной оплаты не даем временно "провалиться" в 3-минутный PAY_WINDOW,
+                // пока payment_result callback еще в пути.
+                if (AMOUNT > 0 && data.status === 'PAY_WINDOW' && data.expires_in < 10 * 60) {
+                    return;
+                }
+
                 // На первом инициализационном sync и при большом дрейфе подравниваем таймер.
                 if (driftMs > 30000) {
                     expiryTs = serverExpiryTs;
