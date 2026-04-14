@@ -223,16 +223,14 @@
         if (total >= 3 && index === total - 1) {
             return 't-price pill-dark';
         }
-        if (index === 1) {
-            return 't-price pill';
-        }
         return 't-price';
     }
 
     function renderTariffs(tariffs) {
         const list = document.getElementById('tariff-list');
         list.innerHTML = tariffs.map((tariff, index) => {
-            const badgeHtml = tariff.badge ? `<span class="t-badge">${escapeHtml(tariff.badge)}</span>` : '';
+            const visualBadge = tariff.badge || (index === 1 ? 'Оптимальный' : '');
+            const badgeHtml = visualBadge ? `<span class="t-badge">${escapeHtml(visualBadge)}</span>` : '';
             const amount = Number(tariff.amount) || 0;
             const minutes = Number(tariff.minutes) || 0;
             return `
