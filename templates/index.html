@@ -334,25 +334,35 @@
         btn.disabled = true;
         btn.innerText = "ОТКРЫВАЕМ СПОСОБЫ ОПЛАТЫ...";
 
-        const chooseUrl = `/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+        const choosePath = `/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+        const absChooseUrl = `https://wifi-pay.kz${choosePath}`;
 
-        // Android: обычная same-tab навигация стабильнее в captive webview.
+        // Android: открываем внешний браузер через intent, чтобы выйти из captive webview.
         if (isAndroid) {
-            logClient('pay_nav_android', Date.now() - t0, 'to_choose_payment_same_tab');
-            window.location.href = chooseUrl;
+            logClient('pay_nav_android', Date.now() - t0, 'intent_to_choose_payment');
+            const intentUrl = 'intent://wifi-pay.kz' + choosePath
+                + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='
+                + encodeURIComponent(absChooseUrl) + ';end';
+            window.location.replace(intentUrl);
             return;
         }
 
-        // iOS: тоже ведем на промежуточный шаг выбора оплаты.
+        // iOS: открываем новую вкладку, чтобы страница выбора сразу была в Safari.
         if (isIOS) {
-            logClient('pay_nav_ios', Date.now() - t0, 'to_choose_payment_same_tab');
-            window.location.href = chooseUrl;
+            logClient('pay_nav_ios', Date.now() - t0, 'blank_tab_to_choose_payment');
+            const link = document.createElement('a');
+            link.href = absChooseUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             return;
         }
 
         const link = document.createElement('a');
-        logClient('pay_nav_other', Date.now() - t0, 'anchor_click_to_choose_payment');
-        link.href = chooseUrl;
+        logClient('pay_nav_other', Date.now() - t0, 'anchor_click_to_choose_payment_abs');
+        link.href = absChooseUrl;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
