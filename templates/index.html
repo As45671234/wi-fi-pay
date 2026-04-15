@@ -332,26 +332,26 @@
         logClient('pay_clicked', 0, 'amount=' + selectedAmt);
         const btn = document.getElementById('main-pay-btn');
         btn.disabled = true;
-        btn.innerText = "ОТКРЫВАЕМ СПОСОБЫ ОПЛАТЫ...";
+        btn.innerText = "ПЕРЕХОДИМ К ОПЛАТЕ...";
 
-        const choosePath = `/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
-        const absChooseUrl = `https://wifi-pay.kz${choosePath}`;
+        const paymentPath = `/start_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+        const absPaymentUrl = `https://wifi-pay.kz${paymentPath}`;
 
         // Android: открываем внешний браузер через intent, чтобы выйти из captive webview.
         if (isAndroid) {
-            logClient('pay_nav_android', Date.now() - t0, 'intent_to_choose_payment');
-            const intentUrl = 'intent://wifi-pay.kz' + choosePath
+            logClient('pay_nav_android', Date.now() - t0, 'intent_to_start_payment');
+            const intentUrl = 'intent://wifi-pay.kz' + paymentPath
                 + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='
-                + encodeURIComponent(absChooseUrl) + ';end';
+                + encodeURIComponent(absPaymentUrl) + ';end';
             window.location.replace(intentUrl);
             return;
         }
 
-        // iOS: открываем новую вкладку, чтобы страница выбора сразу была в Safari.
+        // iOS: открываем новую вкладку, чтобы оплата сразу была в Safari.
         if (isIOS) {
-            logClient('pay_nav_ios', Date.now() - t0, 'blank_tab_to_choose_payment');
+            logClient('pay_nav_ios', Date.now() - t0, 'blank_tab_to_start_payment');
             const link = document.createElement('a');
-            link.href = absChooseUrl;
+            link.href = absPaymentUrl;
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
             document.body.appendChild(link);
@@ -361,8 +361,8 @@
         }
 
         const link = document.createElement('a');
-        logClient('pay_nav_other', Date.now() - t0, 'anchor_click_to_choose_payment_abs');
-        link.href = absChooseUrl;
+        logClient('pay_nav_other', Date.now() - t0, 'anchor_click_to_start_payment_abs');
+        link.href = absPaymentUrl;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
