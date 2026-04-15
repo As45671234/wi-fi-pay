@@ -332,33 +332,27 @@
         logClient('pay_clicked', 0, 'amount=' + selectedAmt);
         const btn = document.getElementById('main-pay-btn');
         btn.disabled = true;
-        btn.innerText = "ПОДГОТОВКА (3 МИН)...";
+        btn.innerText = "ОТКРЫВАЕМ СПОСОБЫ ОПЛАТЫ...";
 
-        const payUrl = `/start_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+        const chooseUrl = `/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
 
-        // Android works better with a normal same-tab navigation after opening the browser.
+        // Android: обычная same-tab навигация стабильнее в captive webview.
         if (isAndroid) {
-            logClient('pay_nav_android', Date.now() - t0, 'same_tab');
-            window.location.href = payUrl;
+            logClient('pay_nav_android', Date.now() - t0, 'to_choose_payment_same_tab');
+            window.location.href = chooseUrl;
             return;
         }
 
-        // iOS captive portal requires target="_blank" to open Safari.
+        // iOS: тоже ведем на промежуточный шаг выбора оплаты.
         if (isIOS) {
-            logClient('pay_nav_ios', Date.now() - t0, 'blank_tab');
-            const link = document.createElement('a');
-            link.href = payUrl;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            logClient('pay_nav_ios', Date.now() - t0, 'to_choose_payment_same_tab');
+            window.location.href = chooseUrl;
             return;
         }
 
         const link = document.createElement('a');
-        logClient('pay_nav_other', Date.now() - t0, 'anchor_click');
-        link.href = payUrl;
+        logClient('pay_nav_other', Date.now() - t0, 'anchor_click_to_choose_payment');
+        link.href = chooseUrl;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

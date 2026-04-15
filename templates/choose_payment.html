@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Выбор оплаты - Wi-Fi Pay</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #1f2937;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .card {
+            background: #ffffff;
+            border-radius: 2rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            padding: 2rem;
+            width: 88%;
+            max-width: 460px;
+            border: 1px solid #f1f5f9;
+        }
+
+        h1 {
+            font-size: 1.25rem;
+            margin: 0 0 0.6rem 0;
+            color: #111827;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            font-size: 0.9rem;
+            margin: 0 0 1.2rem 0;
+            line-height: 1.5;
+        }
+
+        .summary {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 1rem;
+            padding: 0.9rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 0.88rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .summary-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .summary-label {
+            color: #6b7280;
+        }
+
+        .summary-value {
+            font-weight: 700;
+            color: #111827;
+            text-align: right;
+            word-break: break-word;
+        }
+
+        .option {
+            border: 2px solid #dbeafe;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 0.8rem;
+            background: #fff;
+        }
+
+        .option-title {
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 0 0 0.2rem 0;
+            color: #1f2937;
+        }
+
+        .option-desc {
+            font-size: 0.82rem;
+            color: #6b7280;
+            margin: 0 0 0.8rem 0;
+            line-height: 1.45;
+        }
+
+        .btn {
+            width: 100%;
+            border: none;
+            border-radius: 0.9rem;
+            padding: 0.9rem 1rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            display: block;
+            box-sizing: border-box;
+        }
+
+        .btn-freedom {
+            background-color: #1c75ff;
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25);
+        }
+
+        .btn-kaspi {
+            background: #e5e7eb;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
+
+        .hint {
+            font-size: 0.78rem;
+            color: #9ca3af;
+            margin: 0.6rem 0 1rem 0;
+            line-height: 1.45;
+        }
+
+        .actions {
+            display: grid;
+            gap: 0.6rem;
+            margin-top: 0.8rem;
+        }
+
+        .btn-back {
+            background: #fff;
+            border: 1px solid #d1d5db;
+            color: #374151;
+        }
+
+        .meta {
+            font-size: 0.7rem;
+            color: #d1d5db;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-top: 1rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>Выберите способ оплаты</h1>
+    <p class="subtitle">Сначала выберите вариант оплаты. После этого мы продолжим оформление доступа.</p>
+
+    <div class="summary">
+        <div class="summary-row">
+            <span class="summary-label">Тариф</span>
+            <span class="summary-value">{{ tariff_name or "Выбранный тариф" }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="summary-label">Сумма</span>
+            <span class="summary-value">{{ amount }} ₸</span>
+        </div>
+    </div>
+
+    <div class="option">
+        <p class="option-title">Kaspi (эксперимент)</p>
+        <p class="option-desc">Этот режим готовим следующим шагом. Скоро здесь появится оплата через Kaspi.</p>
+        <button class="btn btn-kaspi" type="button" disabled>Скоро будет доступно</button>
+    </div>
+
+    <div class="option">
+        <p class="option-title">Оплата картой</p>
+        <p class="option-desc">Текущий рабочий вариант оплаты через FreedomPay.</p>
+        <a class="btn btn-freedom" href="/start_payment?amount={{ amount }}&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оплатить через карту</a>
+    </div>
+
+    <p class="hint">Данные заказа сохранены: сумма, MAC и router_id передаются на следующий шаг без изменений.</p>
+
+    <div class="actions">
+        <a class="btn btn-back" href="/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Вернуться к тарифам</a>
+    </div>
+
+    <div class="meta">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
+</div>
+</body>
+</html>

@@ -1094,6 +1094,47 @@ async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_
     return templates.TemplateResponse("privacy.html", {"request": request, "mac": mac, "router_id": router_id})
 
 
+@app.get("/choose_payment", response_class=HTMLResponse)
+async def choose_payment(
+    request: Request,
+    amount: int,
+    mac: str,
+    router_id: str = "astana_01",
+    cid: str = "",
+):
+    """Промежуточная страница выбора способа оплаты (Kaspi/FreedomPay)."""
+    cid = (cid or "-")[:24]
+    logger.info(f"[choose_payment] cid={cid} amount={amount} mac={mac[:8]}*** router={router_id}")
+
+    _, _, amount_to_title, allowed_amounts = get_tariff_runtime_state()
+    if amount not in allowed_amounts:
+        return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
+
+    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+        return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
+
+    if router_id not in ROUTERS_CONFIG:
+        logger.error(f"[choose_payment] Неизвестный router_id: {router_id}")
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    tariff_name = amount_to_title.get(amount, "")
+    response = templates.TemplateResponse(
+        "choose_payment.html",
+        {
+            "request": request,
+            "amount": amount,
+            "mac": mac,
+            "router_id": router_id,
+            "cid": cid,
+            "tariff_name": tariff_name,
+        },
+    )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @app.get("/start_payment")
 async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01", cid: str = ""):
     cid = (cid or "-")[:24]
