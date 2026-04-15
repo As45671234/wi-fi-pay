@@ -176,8 +176,8 @@ def get_tariff_runtime_state() -> tuple[list[dict], dict[int, int], dict[int, st
     allowed_amounts = sorted(amount_to_minutes.keys())
     return tariffs, amount_to_minutes, amount_to_title, allowed_amounts
 
-MERCHANT_ID = os.getenv("MERCHANT_ID") or os.getenv("FREEDOMPAY_MERCHANT_ID") or ""
-SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("FREEDOMPAY_SECRET_KEY") or ""
+MERCHANT_ID = os.getenv("MERCHANT_ID") or os.getenv("FREEDOMPAY_MERCHANT_ID") or "581983"
+SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("FREEDOMPAY_SECRET_KEY") or "PMwioQEEEOFbDBAu"
 PAY_URL = os.getenv("PAY_URL") or os.getenv("FREEDOMPAY_API_URL") or "https://api.freedompay.kz/payment.php"
 KZ_TZ = ZoneInfo("Asia/Almaty")
 TRIAL_TOKEN_TTL_SECONDS = 5 * 60
