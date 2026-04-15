@@ -168,8 +168,12 @@
 
     <div class="option">
         <p class="option-title">Kaspi (эксперимент)</p>
-        <p class="option-desc">Этот режим готовим следующим шагом. Скоро здесь появится оплата через Kaspi.</p>
-        <button class="btn btn-kaspi" type="button" disabled>Скоро будет доступно</button>
+        <p class="option-desc">Создается локальный заказ и номер документа. После оплаты статус подтянется автоматически.</p>
+        {% if kaspi_enabled %}
+        <button class="btn btn-freedom" id="kaspiBtn" type="button">Оплатить через Kaspi</button>
+        {% else %}
+        <button class="btn btn-kaspi" type="button" disabled>Kaspi режим выключен</button>
+        {% endif %}
     </div>
 
     <div class="option">
@@ -186,5 +190,39 @@
 
     <div class="meta">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
 </div>
+
+<script>
+'use strict';
+
+const amount = Number("{{ amount }}") || 0;
+const mac = "{{ mac }}";
+const routerId = "{{ router_id }}";
+const cid = "{{ cid }}";
+
+const kaspiBtn = document.getElementById('kaspiBtn');
+if (kaspiBtn) {
+    kaspiBtn.addEventListener('click', async function () {
+        kaspiBtn.disabled = true;
+        kaspiBtn.textContent = 'Создаем заказ...';
+
+        try {
+            const resp = await fetch('/api/kaspi/create_order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount, mac, router_id: routerId, cid })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.ok) {
+                throw new Error((data && data.error) ? data.error : 'Kaspi order create failed');
+            }
+            window.location.href = data.success_url;
+        } catch (err) {
+            kaspiBtn.disabled = false;
+            kaspiBtn.textContent = 'Оплатить через Kaspi';
+            alert('Не удалось создать Kaspi заказ. Попробуйте еще раз.');
+        }
+    });
+}
+</script>
 </body>
 </html>

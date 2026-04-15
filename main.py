@@ -9,12 +9,16 @@ import re
 import secrets
 import json
 import socket
+import threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode, unquote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Form, Response
+from pydantic import BaseModel
+
+from kaspi_client import KaspiApiClient, KaspiClientError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -172,15 +176,47 @@ def get_tariff_runtime_state() -> tuple[list[dict], dict[int, int], dict[int, st
     allowed_amounts = sorted(amount_to_minutes.keys())
     return tariffs, amount_to_minutes, amount_to_title, allowed_amounts
 
-MERCHANT_ID = os.getenv("MERCHANT_ID", "581983")
-SECRET_KEY = os.getenv("SECRET_KEY", "PMwioQEEEOFbDBAu")
-PAY_URL = os.getenv("PAY_URL", "https://api.freedompay.kz/payment.php")
+MERCHANT_ID = os.getenv("MERCHANT_ID") or os.getenv("FREEDOMPAY_MERCHANT_ID") or ""
+SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("FREEDOMPAY_SECRET_KEY") or ""
+PAY_URL = os.getenv("PAY_URL") or os.getenv("FREEDOMPAY_API_URL") or "https://api.freedompay.kz/payment.php"
 KZ_TZ = ZoneInfo("Asia/Almaty")
 TRIAL_TOKEN_TTL_SECONDS = 5 * 60
 TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
 PREPARE_TIMEOUT_SECONDS = 10
+
+KASPI_ENABLED = (os.getenv("KASPI_ENABLED", "false").strip().lower() == "true")
+KASPI_API_BASE_URL = os.getenv("KASPI_API_BASE_URL", "").strip()
+KASPI_API_TOKEN = os.getenv("KASPI_API_TOKEN", "").strip()
+KASPI_ORDERS_PATH = os.getenv("KASPI_ORDERS_PATH", "/orders").strip()
+KASPI_ORDER_DETAILS_PATH = os.getenv("KASPI_ORDER_DETAILS_PATH", "/orders/{order_id}").strip()
+KASPI_API_TIMEOUT_SECONDS = int(os.getenv("KASPI_API_TIMEOUT_SECONDS", "10") or "10")
+KASPI_SYNC_INTERVAL_SECONDS = max(5, int(os.getenv("KASPI_SYNC_INTERVAL_SECONDS", "30") or "30"))
+KASPI_MATCH_WINDOW_MINUTES = max(10, int(os.getenv("KASPI_MATCH_WINDOW_MINUTES", "720") or "720"))
+KASPI_ACTIVATION_RETRY_DELAY_SECONDS = max(10, int(os.getenv("KASPI_ACTIVATION_RETRY_DELAY_SECONDS", "60") or "60"))
+KASPI_MAX_ACTIVATION_RETRIES = max(1, int(os.getenv("KASPI_MAX_ACTIVATION_RETRIES", "5") or "5"))
+
+KASPI_PAID_STATUSES = {
+    s.strip().upper()
+    for s in os.getenv("KASPI_PAID_STATUSES", "PAID,SUCCESS,DONE").split(",")
+    if s.strip()
+}
+KASPI_FAILED_STATUSES = {
+    s.strip().upper()
+    for s in os.getenv("KASPI_FAILED_STATUSES", "CANCELLED,CANCELED,FAILED,REJECTED").split(",")
+    if s.strip()
+}
+KASPI_PENDING_STATUSES = {
+    s.strip().upper()
+    for s in os.getenv("KASPI_PENDING_STATUSES", "NEW,CREATED,PENDING,PROCESSING,WAITING").split(",")
+    if s.strip()
+}
+
+kaspi_sync_task: asyncio.Task | None = None
+kaspi_sync_stop = asyncio.Event()
+kaspi_sync_lock = asyncio.Lock()
+kaspi_activation_db_lock = threading.Lock()
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -222,6 +258,47 @@ def init_db():
         conn.execute("ALTER TABLE orders ADD COLUMN payment_order_id TEXT")
     if 'expires_at' not in columns:
         conn.execute("ALTER TABLE orders ADD COLUMN expires_at TIMESTAMP")
+
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS kaspi_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            local_order_id TEXT,
+            contract_number TEXT,
+            external_order_ref TEXT,
+            mac_address TEXT NOT NULL,
+            router_id TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            minutes INTEGER NOT NULL,
+            kaspi_order_id TEXT,
+            kaspi_status TEXT,
+            paid_at TIMESTAMP,
+            activated_at TIMESTAMP,
+            is_activated INTEGER NOT NULL DEFAULT 0,
+            activation_lock INTEGER NOT NULL DEFAULT 0,
+            activation_attempts INTEGER NOT NULL DEFAULT 0,
+            activation_error TEXT,
+            last_activation_attempt_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_kaspi_orders_contract_number ON kaspi_orders(contract_number)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_kaspi_orders_kaspi_order_id ON kaspi_orders(kaspi_order_id) WHERE kaspi_order_id IS NOT NULL AND kaspi_order_id <> ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kaspi_orders_status ON kaspi_orders(kaspi_status, is_activated)")
+
+    cursor.execute("PRAGMA table_info(kaspi_orders)")
+    k_columns = {row[1] for row in cursor.fetchall()}
+    if 'external_order_ref' not in k_columns:
+        conn.execute("ALTER TABLE kaspi_orders ADD COLUMN external_order_ref TEXT")
+    if 'activation_lock' not in k_columns:
+        conn.execute("ALTER TABLE kaspi_orders ADD COLUMN activation_lock INTEGER NOT NULL DEFAULT 0")
+    if 'activation_attempts' not in k_columns:
+        conn.execute("ALTER TABLE kaspi_orders ADD COLUMN activation_attempts INTEGER NOT NULL DEFAULT 0")
+    if 'activation_error' not in k_columns:
+        conn.execute("ALTER TABLE kaspi_orders ADD COLUMN activation_error TEXT")
+    if 'last_activation_attempt_at' not in k_columns:
+        conn.execute("ALTER TABLE kaspi_orders ADD COLUMN last_activation_attempt_at TIMESTAMP")
+
     conn.commit()
     conn.close()
 
@@ -285,6 +362,357 @@ def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig:
     return hmac.compare_digest(expected, trial_sig.lower())
 
 init_db()
+
+
+class KaspiCreateOrderRequest(BaseModel):
+    amount: int
+    mac: str
+    router_id: str = "astana_01"
+    cid: str = ""
+
+
+class KaspiStatusResponse(BaseModel):
+    contract_number: str
+    kaspi_status: str
+    is_activated: bool
+    paid_at: str | None = None
+    activated_at: str | None = None
+    amount: int
+    minutes: int
+
+
+def _normalize_mac(mac: str) -> str:
+    return (mac or "").upper()
+
+
+def _is_valid_mac(mac: str) -> bool:
+    return bool(re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", _normalize_mac(mac)))
+
+
+def make_contract_number(mac: str) -> str:
+    mac_norm = _normalize_mac(mac)
+    if not _is_valid_mac(mac_norm):
+        raise ValueError("Некорректный MAC")
+    mac_hex = mac_norm.replace(":", "")
+    ts = int(time.time())
+    nonce = secrets.token_hex(2).upper()
+    return f"A13{mac_hex}{ts}{nonce}"
+
+
+def parse_contract_number(contract_number: str) -> tuple[str, bool]:
+    raw = (contract_number or "").strip().upper()
+    m = re.fullmatch(r"A13([0-9A-F]{12})(\d{10})([0-9A-F]{4})", raw)
+    if not m:
+        return "", False
+    mac_hex = m.group(1)
+    mac = ":".join(mac_hex[i:i+2] for i in range(0, 12, 2))
+    if not _is_valid_mac(mac):
+        return "", False
+    return mac, True
+
+
+def _build_kaspi_client() -> KaspiApiClient:
+    return KaspiApiClient(
+        base_url=KASPI_API_BASE_URL,
+        token=KASPI_API_TOKEN,
+        orders_path=KASPI_ORDERS_PATH,
+        order_details_path=KASPI_ORDER_DETAILS_PATH,
+        timeout_sec=KASPI_API_TIMEOUT_SECONDS,
+    )
+
+
+def _select_local_candidates_for_contract(contract_number: str, amount: int | None) -> list[sqlite3.Row]:
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        args: list = [contract_number]
+        sql = """
+            SELECT * FROM kaspi_orders
+            WHERE contract_number = ?
+        """
+        if amount is not None:
+            sql += " AND amount = ?"
+            args.append(amount)
+        sql += " ORDER BY created_at DESC LIMIT 3"
+        rows = conn.execute(sql, tuple(args)).fetchall()
+        return rows
+    finally:
+        conn.close()
+
+
+def _upsert_kaspi_remote_state(
+    contract_number: str,
+    kaspi_order_id: str,
+    kaspi_status: str,
+    paid_at: str | None,
+) -> None:
+    conn = get_db()
+    try:
+        conn.execute(
+            """
+            UPDATE kaspi_orders
+            SET kaspi_order_id = CASE
+                    WHEN ? <> '' THEN ?
+                    ELSE kaspi_order_id
+                END,
+                kaspi_status = ?,
+                paid_at = COALESCE(?, paid_at),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE contract_number = ?
+            """,
+            (kaspi_order_id, kaspi_order_id, kaspi_status, paid_at, contract_number),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _claim_kaspi_activation(contract_number: str) -> bool:
+    with kaspi_activation_db_lock:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                """
+                SELECT kaspi_status, is_activated, activation_lock, activation_attempts, last_activation_attempt_at
+                FROM kaspi_orders
+                WHERE contract_number = ?
+                """,
+                (contract_number,),
+            ).fetchone()
+            if not row:
+                return False
+
+            status = (row[0] or "").upper()
+            is_activated = int(row[1] or 0)
+            activation_lock = int(row[2] or 0)
+            attempts = int(row[3] or 0)
+            last_attempt = row[4]
+
+            if is_activated == 1 or activation_lock == 1:
+                return False
+            if status not in KASPI_PAID_STATUSES:
+                return False
+            if attempts >= KASPI_MAX_ACTIVATION_RETRIES:
+                return False
+
+            if last_attempt:
+                try:
+                    last_dt = datetime.fromisoformat(str(last_attempt).replace("Z", "+00:00"))
+                    if (datetime.utcnow() - last_dt.replace(tzinfo=None)).total_seconds() < KASPI_ACTIVATION_RETRY_DELAY_SECONDS:
+                        return False
+                except Exception:
+                    pass
+
+            updated = conn.execute(
+                """
+                UPDATE kaspi_orders
+                SET activation_lock = 1,
+                    last_activation_attempt_at = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE contract_number = ?
+                  AND is_activated = 0
+                  AND activation_lock = 0
+                """,
+                (datetime.utcnow().isoformat(), contract_number),
+            ).rowcount
+            conn.commit()
+            return updated == 1
+        finally:
+            conn.close()
+
+
+def _finalize_kaspi_activation(contract_number: str, ok: bool, error_text: str = "") -> None:
+    conn = get_db()
+    try:
+        if ok:
+            conn.execute(
+                """
+                UPDATE kaspi_orders
+                SET is_activated = 1,
+                    activation_lock = 0,
+                    activation_error = NULL,
+                    activated_at = COALESCE(activated_at, ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE contract_number = ?
+                """,
+                (datetime.utcnow().isoformat(), contract_number),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE kaspi_orders
+                SET is_activated = 0,
+                    activation_lock = 0,
+                    activation_attempts = activation_attempts + 1,
+                    activation_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE contract_number = ?
+                """,
+                (error_text[:500], contract_number),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _activate_kaspi_order(contract_number: str) -> bool:
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT mac_address, router_id, minutes, amount
+            FROM kaspi_orders
+            WHERE contract_number = ?
+            """,
+            (contract_number,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return False
+
+    mac = row["mac_address"]
+    router_id = row["router_id"]
+    minutes = int(row["minutes"])
+
+    logger.info("[KASPI] activating contract=%s mac=%s router=%s minutes=%s", contract_number, mac[:8] + "***", router_id, minutes)
+    return set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID")
+
+
+def _process_kaspi_paid(contract_number: str) -> None:
+    if not _claim_kaspi_activation(contract_number):
+        return
+
+    try:
+        ok = _activate_kaspi_order(contract_number)
+        if ok:
+            _finalize_kaspi_activation(contract_number, ok=True)
+            logger.info("[KASPI] activation done contract=%s", contract_number)
+        else:
+            _finalize_kaspi_activation(contract_number, ok=False, error_text="Activation failed")
+            logger.error("[KASPI] activation failed contract=%s", contract_number)
+    except Exception as e:
+        _finalize_kaspi_activation(contract_number, ok=False, error_text=str(e))
+        logger.error("[KASPI] activation exception contract=%s err=%s", contract_number, str(e)[:200])
+
+
+def _match_kaspi_order(kaspi_order: dict) -> str | None:
+    contract = (kaspi_order.get("contract_number") or "").strip().upper()
+    if not contract:
+        return None
+
+    amount = kaspi_order.get("amount")
+    candidates = _select_local_candidates_for_contract(contract, amount)
+    if not candidates:
+        return None
+
+    row = candidates[0]
+    created_at = row["created_at"]
+    try:
+        created_dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        created_dt = datetime.utcnow()
+
+    now = datetime.utcnow()
+    delta = abs((now - created_dt).total_seconds())
+    if delta > KASPI_MATCH_WINDOW_MINUTES * 60:
+        return None
+
+    return row["contract_number"]
+
+
+async def kaspi_sync_once() -> dict:
+    if not KASPI_ENABLED:
+        return {"enabled": False, "reason": "flag_disabled"}
+
+    if not KASPI_API_BASE_URL or not KASPI_API_TOKEN:
+        logger.warning("[KASPI] sync skipped, missing API config")
+        return {"enabled": True, "reason": "missing_api_config"}
+
+    async with kaspi_sync_lock:
+        try:
+            client = _build_kaspi_client()
+        except KaspiClientError as e:
+            logger.error("[KASPI] client init failed: %s", str(e))
+            return {"enabled": True, "reason": "client_init_failed"}
+
+        now = datetime.utcnow()
+        from_dt = (now - timedelta(minutes=KASPI_MATCH_WINDOW_MINUTES)).isoformat()
+        to_dt = now.isoformat()
+
+        statuses = sorted(KASPI_PAID_STATUSES | KASPI_PENDING_STATUSES | KASPI_FAILED_STATUSES)
+
+        try:
+            orders = await asyncio.to_thread(client.get_orders, statuses, from_dt, to_dt)
+        except Exception as e:
+            logger.error("[KASPI] sync error: %s", str(e)[:200])
+            return {"enabled": True, "reason": "fetch_failed"}
+
+        matched = 0
+        activated = 0
+
+        for ko in orders:
+            contract = _match_kaspi_order(ko)
+            if not contract:
+                continue
+
+            matched += 1
+            status = (ko.get("kaspi_status") or "").upper()
+            _upsert_kaspi_remote_state(
+                contract_number=contract,
+                kaspi_order_id=(ko.get("kaspi_order_id") or ""),
+                kaspi_status=status,
+                paid_at=ko.get("paid_at"),
+            )
+
+            if status in KASPI_PAID_STATUSES:
+                before = datetime.utcnow()
+                _process_kaspi_paid(contract)
+                after = datetime.utcnow()
+                if (after - before).total_seconds() >= 0:
+                    activated += 1
+
+        return {"enabled": True, "orders": len(orders), "matched": matched, "activation_attempted": activated}
+
+
+async def _kaspi_sync_loop():
+    logger.info("[KASPI] sync loop started, interval=%ss", KASPI_SYNC_INTERVAL_SECONDS)
+    while not kaspi_sync_stop.is_set():
+        try:
+            await kaspi_sync_once()
+        except Exception as e:
+            logger.error("[KASPI] sync loop exception: %s", str(e)[:200])
+        try:
+            await asyncio.wait_for(kaspi_sync_stop.wait(), timeout=KASPI_SYNC_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+    logger.info("[KASPI] sync loop stopped")
+
+
+@app.on_event("startup")
+async def _startup_kaspi_sync():
+    global kaspi_sync_task
+    kaspi_sync_stop.clear()
+    if KASPI_ENABLED:
+        kaspi_sync_task = asyncio.create_task(_kaspi_sync_loop())
+        logger.info("[KASPI] feature enabled")
+    else:
+        logger.info("[KASPI] feature disabled")
+
+
+@app.on_event("shutdown")
+async def _shutdown_kaspi_sync():
+    global kaspi_sync_task
+    kaspi_sync_stop.set()
+    if kaspi_sync_task:
+        try:
+            await asyncio.wait_for(kaspi_sync_task, timeout=5)
+        except Exception:
+            pass
+        kaspi_sync_task = None
+
 
 # --- ДИАГНОСТИКА РОУТЕРОВ ---
 
@@ -1127,6 +1555,7 @@ async def choose_payment(
             "router_id": router_id,
             "cid": cid,
             "tariff_name": tariff_name,
+            "kaspi_enabled": KASPI_ENABLED,
         },
     )
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -1135,10 +1564,128 @@ async def choose_payment(
     return response
 
 
+@app.post("/api/kaspi/create_order")
+async def create_kaspi_order(payload: KaspiCreateOrderRequest):
+    if not KASPI_ENABLED:
+        return utf8_json_response({"error": "Kaspi режим отключен"}, status_code=403)
+
+    amount = int(payload.amount)
+    mac = _normalize_mac(payload.mac)
+    router_id = payload.router_id
+    cid = (payload.cid or "-")[:24]
+
+    _, amount_to_minutes, amount_to_title, allowed_amounts = get_tariff_runtime_state()
+    if amount not in allowed_amounts:
+        return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
+    if not _is_valid_mac(mac):
+        return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    contract_number = make_contract_number(mac)
+    local_order_id = f"kaspi_{int(time.time() * 1000)}"
+    minutes = int(amount_to_minutes.get(amount, 60))
+
+    conn = get_db()
+    try:
+        conn.execute(
+            """
+            INSERT INTO kaspi_orders (
+                local_order_id,
+                contract_number,
+                external_order_ref,
+                mac_address,
+                router_id,
+                amount,
+                minutes,
+                kaspi_status,
+                is_activated,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (
+                local_order_id,
+                contract_number,
+                contract_number,
+                mac,
+                router_id,
+                amount,
+                minutes,
+                "CREATED",
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        return utf8_json_response({"error": "Конфликт заказа, повторите"}, status_code=409)
+    finally:
+        conn.close()
+
+    logger.info("[KASPI] local order created cid=%s contract=%s mac=%s router=%s amount=%s", cid, contract_number, mac[:8] + "***", router_id, amount)
+
+    return utf8_json_response(
+        {
+            "ok": True,
+            "local_order_id": local_order_id,
+            "contract_number": contract_number,
+            "amount": amount,
+            "minutes": minutes,
+            "tariff_name": amount_to_title.get(amount, ""),
+            "status_url": f"/api/kaspi/order_status?contract_number={contract_number}",
+            "success_url": f"/success?mac={mac}&router_id={router_id}&minutes={minutes}&amount={amount}&payment_method=kaspi&contract_number={contract_number}&cid={cid}",
+        }
+    )
+
+
+@app.get("/api/kaspi/order_status")
+async def kaspi_order_status(contract_number: str):
+    contract = (contract_number or "").strip().upper()
+    if not contract:
+        return utf8_json_response({"error": "contract_number required"}, status_code=400)
+
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT contract_number, kaspi_status, is_activated, paid_at, activated_at, amount, minutes
+            FROM kaspi_orders
+            WHERE contract_number = ?
+            """,
+            (contract,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return utf8_json_response({"error": "order not found"}, status_code=404)
+
+    return utf8_json_response(
+        KaspiStatusResponse(
+            contract_number=row["contract_number"],
+            kaspi_status=(row["kaspi_status"] or ""),
+            is_activated=bool(row["is_activated"]),
+            paid_at=row["paid_at"],
+            activated_at=row["activated_at"],
+            amount=int(row["amount"] or 0),
+            minutes=int(row["minutes"] or 0),
+        ).dict()
+    )
+
+
+@app.post("/api/kaspi/sync_once")
+async def kaspi_sync_trigger():
+    result = await kaspi_sync_once()
+    return utf8_json_response(result)
+
+
 @app.get("/start_payment")
 async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01", cid: str = ""):
     cid = (cid or "-")[:24]
     logger.info(f"[start_payment] START cid={cid} amount={amount} mac={mac[:8]}*** router={router_id}")
+    if not MERCHANT_ID or not SECRET_KEY:
+        logger.error("[start_payment] FreedomPay env is not configured")
+        return utf8_json_response({"error": "Платежный шлюз временно недоступен"}, status_code=503)
     _, _, _, allowed_amounts = get_tariff_runtime_state()
     if amount not in allowed_amounts:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
@@ -1310,11 +1857,35 @@ async def success(
     router_id: str = "astana_01",
     minutes: int = 60,
     amount: int = 0,
+    payment_method: str = "card",
+    contract_number: str = "",
 ):
     mac = decode_nested_url_value(mac)
     router_id = decode_nested_url_value(router_id)
+    contract_number = decode_nested_url_value(contract_number).strip().upper()
     _, _, amount_to_title, _ = get_tariff_runtime_state()
     tariff_name = amount_to_title.get(amount, "")
+
+    kaspi_status = ""
+    kaspi_is_activated = False
+    if payment_method == "kaspi" and contract_number:
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT kaspi_status, is_activated
+                FROM kaspi_orders
+                WHERE contract_number = ?
+                """,
+                (contract_number,),
+            ).fetchone()
+            if row:
+                kaspi_status = (row["kaspi_status"] or "")
+                kaspi_is_activated = bool(row["is_activated"])
+        finally:
+            conn.close()
+
     return templates.TemplateResponse("success.html", {
         "request": request,
         "mac": mac,
@@ -1322,6 +1893,10 @@ async def success(
         "minutes": minutes,
         "amount": amount,
         "tariff_name": tariff_name,
+        "payment_method": payment_method,
+        "contract_number": contract_number,
+        "kaspi_status": kaspi_status,
+        "kaspi_is_activated": "true" if kaspi_is_activated else "false",
     })
 
 if __name__ == "__main__":
