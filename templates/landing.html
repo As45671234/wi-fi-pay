@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi-Pay — Интернет в автобусе за минуту</title>
+    <meta name="description" content="Быстрый и удобный доступ к WiFi в общественном транспорте Астаны. Подключитесь за 30 секунд, оплата картой.">
+    <!-- Yandex.Metrika counter -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=108568669', 'ym');
+        ym(108568669, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/108568669" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --blue: #3b82f6;
+            --blue-dark: #1d4ed8;
+            --blue-light: #eff6ff;
+            --blue-mid: #60a5fa;
+            --text: #0f172a;
+            --muted: #64748b;
+            --bg: #f8fafc;
+            --white: #ffffff;
+            --radius: 1.5rem;
+            --shadow: 0 8px 32px rgba(59,130,246,0.10);
+            --shadow-lg: 0 20px 60px rgba(59,130,246,0.15);
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ─── NAV ─── */
+        nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 2rem;
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(59,130,246,0.08);
+        }
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            text-decoration: none;
+        }
+        .nav-logo {
+            width: 36px; height: 36px;
+            border-radius: 10px;
+            object-fit: cover;
+        }
+        .nav-name {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--text);
+            letter-spacing: -0.02em;
+        }
+        .nav-name span { color: var(--blue); }
+        .nav-cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: var(--blue);
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.875rem;
+            padding: 0.55rem 1.2rem;
+            border-radius: 999px;
+            text-decoration: none;
+            transition: background 0.18s, transform 0.15s;
+        }
+        .nav-cta:active { transform: scale(0.97); }
+        .nav-cta:hover { background: var(--blue-dark); }
+
+        /* ─── HERO ─── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 7rem 1.5rem 4rem;
+            background: linear-gradient(160deg, #f0f7ff 0%, #e8f2ff 40%, #f5f0ff 100%);
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: "";
+            position: absolute;
+            width: 600px; height: 600px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
+            top: -100px; left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+        }
+        .hero-logo {
+            width: 80px; height: 80px;
+            border-radius: 22px;
+            object-fit: cover;
+            box-shadow: 0 8px 24px rgba(59,130,246,0.2);
+            margin-bottom: 1.5rem;
+        }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: #dbeafe;
+            color: var(--blue-dark);
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 0.35rem 0.9rem;
+            border-radius: 999px;
+            margin-bottom: 1.2rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .hero h1 {
+            font-size: clamp(2rem, 5vw, 3.2rem);
+            font-weight: 900;
+            line-height: 1.1;
+            letter-spacing: -0.03em;
+            color: var(--text);
+            max-width: 680px;
+            margin-bottom: 1.2rem;
+        }
+        .hero h1 .accent { color: var(--blue); }
+        .hero-sub {
+            font-size: clamp(1rem, 2.5vw, 1.2rem);
+            color: var(--muted);
+            max-width: 520px;
+            margin-bottom: 2.5rem;
+            line-height: 1.55;
+        }
+        .hero-btns {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            justify-content: center;
+            margin-bottom: 3rem;
+        }
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: #fff;
+            font-weight: 700;
+            font-size: 1rem;
+            padding: 0.9rem 2rem;
+            border-radius: 999px;
+            text-decoration: none;
+            box-shadow: 0 6px 20px rgba(59,130,246,0.35);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(59,130,246,0.42); }
+        .btn-primary:active { transform: scale(0.97); }
+        .btn-secondary {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--white);
+            color: var(--blue);
+            font-weight: 700;
+            font-size: 1rem;
+            padding: 0.9rem 2rem;
+            border-radius: 999px;
+            text-decoration: none;
+            border: 2px solid #dbeafe;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .btn-secondary:hover { background: #eff6ff; border-color: var(--blue-mid); }
+
+        .hero-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+        }
+        .hero-stat {
+            background: rgba(255,255,255,0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(59,130,246,0.12);
+            border-radius: 999px;
+            padding: 0.5rem 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .hero-stat .stat-icon { font-size: 1.1rem; }
+        .hero-stat .stat-text { font-weight: 600; color: var(--text); }
+        .hero-stat .stat-sub { color: var(--muted); font-size: 0.8rem; }
+
+        /* ─── SECTION ─── */
+        section { padding: 5rem 1.5rem; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .section-label {
+            display: inline-block;
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--blue);
+            background: var(--blue-light);
+            padding: 0.3rem 0.85rem;
+            border-radius: 999px;
+            margin-bottom: 0.75rem;
+        }
+        .section-title {
+            font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            line-height: 1.15;
+            color: var(--text);
+            margin-bottom: 0.75rem;
+        }
+        .section-sub {
+            font-size: 1.05rem;
+            color: var(--muted);
+            max-width: 560px;
+        }
+
+        /* ─── HOW IT WORKS ─── */
+        .steps-bg { background: var(--white); }
+
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+        .step-card {
+            border-radius: var(--radius);
+            overflow: hidden;
+            background: var(--bg);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .step-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+        .step-img-wrap {
+            position: relative;
+            width: 100%;
+            overflow: hidden;
+            background: linear-gradient(135deg, #dbeafe, #ede9fe);
+        }
+        .step-img-wrap img {
+            width: 100%;
+            display: block;
+            object-fit: cover;
+            object-position: top center;
+            max-height: 420px;
+            transition: transform 0.3s;
+        }
+        .step-card:hover .step-img-wrap img { transform: scale(1.02); }
+        .step-num {
+            position: absolute;
+            top: 1rem; left: 1rem;
+            width: 36px; height: 36px;
+            background: var(--blue);
+            color: #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            font-weight: 800;
+            box-shadow: 0 4px 12px rgba(59,130,246,0.4);
+        }
+        .step-body {
+            padding: 1.25rem 1.35rem 1.5rem;
+        }
+        .step-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 0.4rem;
+        }
+        .step-desc {
+            font-size: 0.88rem;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        /* ─── TARIFFS ─── */
+        .tariffs-bg {
+            background: linear-gradient(160deg, #f0f7ff 0%, #f8fafc 100%);
+        }
+        .tariffs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.25rem;
+            margin-top: 2.5rem;
+        }
+        .tariff-card {
+            background: var(--white);
+            border-radius: var(--radius);
+            border: 2px solid #e2e8f0;
+            padding: 1.75rem 1.5rem;
+            position: relative;
+            transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+        }
+        .tariff-card:hover { border-color: var(--blue-mid); transform: translateY(-3px); box-shadow: var(--shadow); }
+        .tariff-card.featured {
+            border-color: var(--blue);
+            box-shadow: var(--shadow);
+        }
+        .tariff-badge {
+            position: absolute;
+            top: -0.6rem; left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            color: #fff;
+            font-size: 0.68rem;
+            font-weight: 800;
+            padding: 0.2rem 0.8rem;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            white-space: nowrap;
+        }
+        .tariff-icon {
+            width: 48px; height: 48px;
+            border-radius: 14px;
+            background: var(--blue-light);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.4rem;
+            margin-bottom: 1rem;
+        }
+        .tariff-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 0.25rem;
+        }
+        .tariff-desc {
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-bottom: 1.25rem;
+        }
+        .tariff-price {
+            display: flex;
+            align-items: baseline;
+            gap: 0.25rem;
+        }
+        .tariff-price .amount {
+            font-size: 2rem;
+            font-weight: 900;
+            color: var(--text);
+            letter-spacing: -0.03em;
+        }
+        .tariff-price .currency {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        /* ─── FEATURES ─── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.25rem;
+            margin-top: 2.5rem;
+        }
+        .feature-card {
+            background: var(--white);
+            border-radius: var(--radius);
+            border: 1px solid #e2e8f0;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .feature-icon {
+            width: 46px; height: 46px;
+            border-radius: 14px;
+            background: var(--blue-light);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.35rem;
+        }
+        .feature-title {
+            font-size: 0.98rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .feature-desc {
+            font-size: 0.85rem;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        /* ─── CTA SECTION ─── */
+        .cta-section {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 40%, #3b82f6 100%);
+            text-align: center;
+            padding: 5rem 1.5rem;
+        }
+        .cta-section .section-title { color: #fff; }
+        .cta-section .section-sub { color: rgba(255,255,255,0.72); margin: 0 auto 2rem; }
+        .btn-white {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: #fff;
+            color: var(--blue-dark);
+            font-weight: 800;
+            font-size: 1.05rem;
+            padding: 0.95rem 2.2rem;
+            border-radius: 999px;
+            text-decoration: none;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .btn-white:hover { transform: translateY(-2px); box-shadow: 0 12px 36px rgba(0,0,0,0.22); }
+        .btn-white:active { transform: scale(0.97); }
+        .cta-note {
+            margin-top: 1.2rem;
+            font-size: 0.82rem;
+            color: rgba(255,255,255,0.55);
+        }
+
+        /* ─── FOOTER ─── */
+        footer {
+            background: var(--text);
+            color: rgba(255,255,255,0.5);
+            text-align: center;
+            padding: 2.5rem 1.5rem;
+            font-size: 0.85rem;
+        }
+        footer a { color: rgba(255,255,255,0.65); text-decoration: none; }
+        footer a:hover { color: #fff; }
+        .footer-logo {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .footer-logo img { width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
+        .footer-logo span { font-weight: 800; font-size: 1rem; color: #fff; }
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            margin: 0.75rem 0 1.25rem;
+            flex-wrap: wrap;
+        }
+
+        /* ─── RESPONSIVE ─── */
+        @media (max-width: 640px) {
+            nav { padding: 0.85rem 1.25rem; }
+            .hero { padding: 6rem 1.25rem 3.5rem; }
+            section { padding: 3.5rem 1.25rem; }
+            .steps-grid { gap: 1.25rem; }
+            .tariffs-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+    <a href="/landing" class="nav-brand">
+        <img src="/img/logo.jpeg" alt="WiFi-Pay Logo" class="nav-logo">
+        <span class="nav-name">WiFi<span>-Pay</span></span>
+    </a>
+    <a href="/#" class="nav-cta">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg>
+        Подключиться
+    </a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <img src="/img/logo.jpeg" alt="WiFi-Pay" class="hero-logo">
+    <div class="hero-badge">
+        <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        Общественный транспорт Астаны
+    </div>
+    <h1>Быстрый <span class="accent">WiFi</span> в автобусе<br>за 30 секунд</h1>
+    <p class="hero-sub">Подключитесь к интернету прямо в пути — без регистрации, без сложностей. Выберите тариф, оплатите картой и наслаждайтесь скоростным интернетом.</p>
+    <div class="hero-btns">
+        <a href="/#" class="btn-primary">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg>
+            Начать сейчас
+        </a>
+        <a href="#how-it-works" class="btn-secondary">
+            Как это работает
+        </a>
+    </div>
+    <div class="hero-stats">
+        <div class="hero-stat">
+            <span class="stat-icon">⚡</span>
+            <span class="stat-text">30 сек</span>
+            <span class="stat-sub">до подключения</span>
+        </div>
+        <div class="hero-stat">
+            <span class="stat-icon">💳</span>
+            <span class="stat-text">Картой</span>
+            <span class="stat-sub">онлайн-оплата</span>
+        </div>
+        <div class="hero-stat">
+            <span class="stat-icon">🚌</span>
+            <span class="stat-text">Астана</span>
+            <span class="stat-sub">общественный транспорт</span>
+        </div>
+    </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="steps-bg" id="how-it-works">
+    <div class="container">
+        <div style="text-align:center; margin-bottom:0.5rem;">
+            <span class="section-label">Как это работает</span>
+        </div>
+        <h2 class="section-title" style="text-align:center;">Три шага — и вы в сети</h2>
+        <p class="section-sub" style="text-align:center; margin: 0 auto;">Никакой регистрации и паролей. Просто подключитесь к WiFi и следуйте инструкции.</p>
+
+        <div class="steps-grid">
+            <!-- Step 1 -->
+            <div class="step-card">
+                <div class="step-img-wrap">
+                    <img src="/img/1.PNG" alt="Шаг 1 — Выберите тариф">
+                    <div class="step-num">1</div>
+                </div>
+                <div class="step-body">
+                    <div class="step-title">Подключитесь к WiFi</div>
+                    <p class="step-desc">Выберите сеть WiFi-Pay в автобусе. Откроется страница с тарифами — выберите подходящий вариант.</p>
+                </div>
+            </div>
+            <!-- Step 2 -->
+            <div class="step-card">
+                <div class="step-img-wrap">
+                    <img src="/img/2.PNG" alt="Шаг 2 — Оплата картой">
+                    <div class="step-num">2</div>
+                </div>
+                <div class="step-body">
+                    <div class="step-title">Оплатите картой</div>
+                    <p class="step-desc">Введите данные карты на защищённой странице FreedomPay. Поддерживаются Visa, Mastercard и карты Kaspi.</p>
+                </div>
+            </div>
+            <!-- Step 3 -->
+            <div class="step-card">
+                <div class="step-img-wrap">
+                    <img src="/img/3.PNG" alt="Шаг 3 — Доступ открыт">
+                    <div class="step-num">3</div>
+                </div>
+                <div class="step-body">
+                    <div class="step-title">Интернет открыт!</div>
+                    <p class="step-desc">После оплаты ваше устройство автоматически получает доступ. Пользуйтесь интернетом весь выбранный период.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- TARIFFS -->
+<section class="tariffs-bg" id="tariffs">
+    <div class="container">
+        <span class="section-label">Тарифы</span>
+        <h2 class="section-title">Выберите свой тариф</h2>
+        <p class="section-sub">Никаких скрытых платежей. Оплата единоразово, доступ работает на весь период.</p>
+
+        <div class="tariffs-grid">
+            <div class="tariff-card">
+                <div class="tariff-icon">⏱️</div>
+                <div class="tariff-title">2 часа доступа</div>
+                <div class="tariff-desc">Хватит на большинство поездок по городу</div>
+                <div class="tariff-price">
+                    <span class="amount">500</span>
+                    <span class="currency">₸</span>
+                </div>
+            </div>
+            <div class="tariff-card featured">
+                <div class="tariff-badge">⚡ Популярное</div>
+                <div class="tariff-icon">🕓</div>
+                <div class="tariff-title">4 часа доступа</div>
+                <div class="tariff-desc">Оптимальный выбор для длинной поездки</div>
+                <div class="tariff-price">
+                    <span class="amount">1 000</span>
+                    <span class="currency">₸</span>
+                </div>
+            </div>
+            <div class="tariff-card">
+                <div class="tariff-badge" style="background: linear-gradient(90deg,#059669,#10b981);">💎 Выгодно!</div>
+                <div class="tariff-icon">🌟</div>
+                <div class="tariff-title">До конца поездки</div>
+                <div class="tariff-desc">Целый день — пересаживайтесь и не думайте об интернете</div>
+                <div class="tariff-price">
+                    <span class="amount">1 500</span>
+                    <span class="currency">₸</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- FEATURES -->
+<section>
+    <div class="container">
+        <div style="text-align:center;">
+            <span class="section-label">Преимущества</span>
+            <h2 class="section-title" style="text-align:center;">Почему WiFi-Pay?</h2>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-title">Безопасная оплата</div>
+                <p class="feature-desc">Платёжная система FreedomPay — соответствие стандарту PCI DSS, данные карты под защитой.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">Мгновенный доступ</div>
+                <p class="feature-desc">После оплаты интернет включается автоматически — не нужно перезагружать WiFi или вводить пароль.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📱</div>
+                <div class="feature-title">Любое устройство</div>
+                <p class="feature-desc">Работает на смартфоне, планшете или ноутбуке. iOS, Android, Windows — всё поддерживается.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🚫</div>
+                <div class="feature-title">Без регистрации</div>
+                <p class="feature-desc">Не нужно создавать аккаунт или подтверждать номер телефона. Просто выберите тариф и оплатите.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <div class="feature-title">Надёжная сеть</div>
+                <p class="feature-desc">Стабильное соединение на маршрутах Астаны. Ваш трафик надёжно защищён.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💬</div>
+                <div class="feature-title">Поддержка 24/7</div>
+                <p class="feature-desc">Возникли вопросы? Мы готовы помочь. Напишите нам в любое время суток.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+    <div class="container">
+        <h2 class="section-title">Готовы подключиться?</h2>
+        <p class="section-sub">Найдите сеть WiFi-Pay в вашем автобусе и наслаждайтесь интернетом уже через минуту.</p>
+        <a href="/#" class="btn-white">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg>
+            Выбрать тариф
+        </a>
+        <p class="cta-note">От 500 ₸ · Оплата картой · Без регистрации</p>
+    </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <div class="footer-logo">
+        <img src="/img/logo.jpeg" alt="WiFi-Pay">
+        <span>WiFi-Pay</span>
+    </div>
+    <div class="footer-links">
+        <a href="/offer">Оферта</a>
+        <a href="/privacy">Политика конфиденциальности</a>
+        <a href="/payment_methods">Способы оплаты</a>
+    </div>
+    <p>© 2025 WiFi-Pay. Интернет в общественном транспорте Астаны.</p>
+</footer>
+
+</body>
+</html>

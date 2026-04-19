@@ -225,6 +225,12 @@ if os.path.isdir(STATIC_DIR):
 else:
     logger.warning(f"Static directory not found, skipping mount: {STATIC_DIR}")
 
+IMG_DIR = os.path.join(BASE_DIR, "img")
+if os.path.isdir(IMG_DIR):
+    app.mount("/img", StaticFiles(directory=IMG_DIR), name="img")
+else:
+    logger.warning(f"Img directory not found, skipping mount: {IMG_DIR}")
+
 # --- БАЗА ДАННЫХ ---
 DB_PATH = os.path.join(BASE_DIR, 'gateway.db')
 
@@ -1520,6 +1526,12 @@ async def offer_page(request: Request, mac: str = "00:00:00:00:00:00", router_id
 @app.get("/privacy.html", response_class=HTMLResponse)
 async def privacy_page(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     return templates.TemplateResponse("privacy.html", {"request": request, "mac": mac, "router_id": router_id})
+
+
+@app.get("/landing", response_class=HTMLResponse)
+async def landing(request: Request):
+    """Лендинг-страница WiFi-Pay."""
+    return templates.TemplateResponse("landing.html", {"request": request})
 
 
 @app.get("/choose_payment", response_class=HTMLResponse)
