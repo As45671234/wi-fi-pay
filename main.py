@@ -185,14 +185,11 @@ TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
 PREPARE_TIMEOUT_SECONDS = 10
+# --- QR-флоу: определение MAC по IP ---
 QR_TOKEN_TTL_SECONDS = max(60, int(os.getenv("QR_TOKEN_TTL_SECONDS", str(60 * 60 * 24 * 365)) or str(60 * 60 * 24 * 365)))
-QR_LOOKBACK_SECONDS = max(15, int(os.getenv("QR_LOOKBACK_SECONDS", "120") or "120"))
-QR_MAX_CANDIDATES = max(1, int(os.getenv("QR_MAX_CANDIDATES", "8") or "8"))
 QR_TOKEN_SECRET = os.getenv("QR_TOKEN_SECRET") or SECRET_KEY
-QR_NARROW_LOOKBACK_SECONDS = max(15, int(os.getenv("QR_NARROW_LOOKBACK_SECONDS", "45") or "45"))
-QR_FRESH_FIRST_SEEN_SECONDS = max(20, int(os.getenv("QR_FRESH_FIRST_SEEN_SECONDS", "90") or "90"))
-QR_FAST_RESCAN_TIMEOUT_SECONDS = max(1, int(os.getenv("QR_FAST_RESCAN_TIMEOUT_SECONDS", "2") or "2"))
-QR_CLIENT_AUTO_RETRY_MS = max(800, int(os.getenv("QR_CLIENT_AUTO_RETRY_MS", "1200") or "1200"))
+# Интервал автоповтора на странице ошибки (в миллисекундах)
+QR_CLIENT_AUTO_RETRY_MS = max(800, int(os.getenv("QR_CLIENT_AUTO_RETRY_MS", "1500") or "1500"))
 
 PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS = max(2, int(os.getenv("PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS", "5") or "5"))
 PENDING_ACTIVATION_RETRY_DELAY_SECONDS = max(5, int(os.getenv("PENDING_ACTIVATION_RETRY_DELAY_SECONDS", "20") or "20"))
@@ -450,179 +447,22 @@ def is_valid_router_qr_signature(router_id: str, ts: str, sig: str) -> bool:
     return hmac.compare_digest(expected, sig.lower())
 
 
-def _mask_mac(mac: str) -> str:
-    raw = (mac or "").upper()
-    if not _is_valid_mac(raw):
-        return "—"
-    parts = raw.split(":")
-    return f"{parts[0]}:{parts[1]}:..:{parts[4]}:{parts[5]}"
-
-
-def _parse_mikrotik_uptime(s: str) -> int:
-    """Parse MikroTik uptime string like '1h2m3s', '5m30s', '45s' → seconds.
-    Returns 9_999_999 when the string is empty or unparseable (treated as very old connection).
-    """
-    if not s:
-        return 9_999_999
-    total = 0
-    for m in re.finditer(r'(\d+)([wdhms])', s.lower()):
-        v, u = int(m.group(1)), m.group(2)
-        total += v * {'w': 604800, 'd': 86400, 'h': 3600, 'm': 60, 's': 1}[u]
-    return total if total > 0 else 9_999_999
-
-
-def _upsert_router_clients_seen(router_id: str, macs: list, source: str = "router_poll") -> int:
-    # Accept list[str] or list[dict] with 'mac' key (from _collect_router_client_macs)
-    mac_list = [m['mac'] if isinstance(m, dict) else m for m in macs]
-    if not mac_list:
-        return 0
-    conn = get_db()
-    inserted = 0
-    try:
-        for mac in mac_list:
-            mac_norm = _normalize_mac(mac)
-            if not _is_valid_mac(mac_norm):
-                continue
-            conn.execute(
-                """
-                INSERT INTO router_clients_seen (router_id, mac_address, first_seen, last_seen, seen_count, source)
-                VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, ?)
-                ON CONFLICT(router_id, mac_address)
-                DO UPDATE SET
-                    last_seen = CURRENT_TIMESTAMP,
-                    seen_count = seen_count + 1,
-                    source = excluded.source
-                """,
-                (router_id, mac_norm, source),
-            )
-            inserted += 1
-        conn.commit()
-        return inserted
-    finally:
-        conn.close()
-
-
-def _get_recent_router_clients(router_id: str, lookback_seconds: int = QR_LOOKBACK_SECONDS, limit: int = QR_MAX_CANDIDATES) -> list[dict]:
-    conn = get_db()
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(
-            """
-                        SELECT mac_address, first_seen, last_seen, seen_count
-            FROM router_clients_seen
-            WHERE router_id = ?
-              AND last_seen > datetime('now', ?)
-            ORDER BY last_seen DESC
-            LIMIT ?
-            """,
-            (router_id, f"-{int(lookback_seconds)} seconds", int(limit)),
-        ).fetchall()
-        result = []
-        for row in rows:
-            mac = row["mac_address"]
-            result.append(
-                {
-                    "mac": mac,
-                    "masked_mac": _mask_mac(mac),
-                    "first_seen": row["first_seen"],
-                    "last_seen": row["last_seen"],
-                    "seen_count": int(row["seen_count"] or 0),
-                }
-            )
-        return result
-    finally:
-        conn.close()
-
-
-def _is_recent_sqlite_ts(ts: str | None, within_seconds: int) -> bool:
-    if not ts:
-        return False
-    try:
-        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).replace(tzinfo=None)
-        return (datetime.utcnow() - dt).total_seconds() <= max(1, int(within_seconds))
-    except Exception:
-        return False
-
-
-def _sqlite_ts_to_dt(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).replace(tzinfo=None)
-    except Exception:
-        return None
-
-
-def _pick_best_qr_candidate(candidates: list[dict], busy_macs: set[str]) -> dict | None:
-    free = [c for c in candidates if c.get("mac") not in busy_macs]
-    if not free:
-        return None
-
-    # 1) Самый надежный кейс: ровно один активный MAC в узком окне.
-    narrow = [
-        c for c in free
-        if _is_recent_sqlite_ts(c.get("last_seen"), QR_NARROW_LOOKBACK_SECONDS)
-    ]
-    if len(narrow) == 1:
-        return narrow[0]
-
-    # 2) Если есть явный лидер по свежести, выбираем его.
-    free_sorted = sorted(
-        free,
-        key=lambda c: _sqlite_ts_to_dt(c.get("last_seen")) or datetime.min,
-        reverse=True,
-    )
-
-    if len(free_sorted) >= 2:
-        top_dt = _sqlite_ts_to_dt(free_sorted[0].get("last_seen"))
-        second_dt = _sqlite_ts_to_dt(free_sorted[1].get("last_seen"))
-        if top_dt and second_dt:
-            delta = (top_dt - second_dt).total_seconds()
-            if delta >= 45 and _is_recent_sqlite_ts(free_sorted[0].get("last_seen"), QR_LOOKBACK_SECONDS):
-                return free_sorted[0]
-
-    # 3) Если свободный кандидат один, но чуть старее узкого окна, тоже берем его.
-    if len(free_sorted) == 1 and _is_recent_sqlite_ts(free_sorted[0].get("last_seen"), QR_LOOKBACK_SECONDS):
-        return free_sorted[0]
-
-    return None
-
-
-# Максимальный аптайм (в секундах) при котором считаем устройство "только что подключившимся".
-# От момента подключения до момента чтения uptime проходит ~15-20 сек (скан + загрузка + API).
-# Даём 90 сек запаса — это достаточно для нормального сценария.
-QR_FRESH_UPTIME_SECONDS = 90
-
-
-def _pick_by_uptime(live_clients: list[dict], busy_macs: set[str]) -> dict | None:
-    """Выбрать устройство пользователя по uptime из MikroTik (живые данные).
-
-    Правило: выбираем MAC только если РОВНО ОДНО устройство среди свободных
-    имеет uptime < QR_FRESH_UPTIME_SECONDS.
-
-    Это защищает от сценария "Person B подключился после Person A, Person A
-    открывает страницу — не должен получить MAC Person B".
-    Если свежих устройств 2+, вернём None (ambiguous), пока они не разойдутся по времени.
-    """
-    free = [c for c in live_clients if c.get('mac') not in busy_macs]
-    if not free:
-        return None
-
-    fresh = [c for c in free if c.get('uptime_seconds', 9_999_999) <= QR_FRESH_UPTIME_SECONDS]
-
-    # Ровно одно свежее устройство — однозначно пользователь, который только что подключился
-    if len(fresh) == 1:
-        return fresh[0]
-
-    # 0 свежих: либо все подключены давно, либо uptime не вернулся из роутера
-    # 2+ свежих: несколько недавних подключений — нельзя определить кто сканирует
-    return None
-
+# ---------------------------------------------------------------------------
+# QR-флоу: определение MAC по IP-адресу HTTP-запроса
+# ---------------------------------------------------------------------------
+# Принцип: когда пользователь открывает /q, его HTTP-запрос идёт с IP-адреса,
+# который MikroTik назначил именно его устройству. В /ip/hotspot/host и
+# /ip/hotspot/active хранится пара address (IP) + mac-address.
+# Просто сопоставляем IP запроса с таблицей роутера — мгновенно, точно,
+# работает независимо от времени подключения и числа устройств в сети.
+# ---------------------------------------------------------------------------
 
 def _lookup_mac_by_ip(live_clients: list[dict], client_ip: str, busy_macs: set[str]) -> dict | None:
-    """Основной метод определения MAC: ищем клиента с IP == IP HTTP-запроса пользователя.
-    Это работает всегда — независимо от того, давно ли устройство подключено.
-    MikroTik хранит address в /ip/hotspot/host и /ip/hotspot/active.
+    """Найти MAC пользователя по IP его HTTP-запроса.
+
+    Возвращает первый элемент из live_clients, у которого поле 'address'
+    совпадает с client_ip и MAC не занят активацией. Если IP неизвестен или
+    совпадений нет — возвращает None.
     """
     if not client_ip or client_ip in ('unknown', '127.0.0.1'):
         return None
@@ -632,8 +472,16 @@ def _lookup_mac_by_ip(live_clients: list[dict], client_ip: str, busy_macs: set[s
     return None
 
 
-def _collect_router_client_macs(router_id: str) -> list[dict]:
-    """Return [{mac, uptime_seconds, address}] for all hotspot clients, sorted by uptime ascending."""
+def _collect_router_clients(router_id: str) -> list[dict]:
+    """Получить список клиентов хотспота с роутера: [{mac, address}].
+
+    Опрашивает /ip/hotspot/host и /ip/hotspot/active, объединяет данные.
+    - mac     — нормализованный MAC-адрес (XX:XX:XX:XX:XX:XX)
+    - address — IP-адрес, назначенный MikroTik этому устройству
+
+    Поле address используется как ключ для однозначного определения MAC
+    пользователя по IP его HTTP-запроса к серверу.
+    """
     config = ROUTERS_CONFIG.get(router_id)
     if not config:
         return []
@@ -652,37 +500,25 @@ def _collect_router_client_macs(router_id: str) -> list[dict]:
             plaintext_login=True,
         )
         api = connection.get_api()
-        host_res = api.get_resource('/ip/hotspot/host')
-        active_res = api.get_resource('/ip/hotspot/active')
 
-        # mac → {uptime_seconds, address}
-        macs: dict[str, dict] = {}
+        # mac → IP-адрес клиента
+        macs: dict[str, str] = {}
 
-        for row in host_res.call('print'):
+        for row in api.get_resource('/ip/hotspot/host').call('print'):
             mac = _normalize_mac(row.get('mac-address', ''))
             if _is_valid_mac(mac):
-                uptime_sec = _parse_mikrotik_uptime(row.get('uptime', ''))
                 addr = (row.get('address') or '').strip()
-                if mac not in macs or uptime_sec < macs[mac]['uptime_seconds']:
-                    macs[mac] = {'uptime_seconds': uptime_sec, 'address': addr}
+                if mac not in macs and addr:
+                    macs[mac] = addr
 
-        for row in active_res.call('print'):
+        for row in api.get_resource('/ip/hotspot/active').call('print'):
             mac = _normalize_mac(row.get('mac-address', ''))
             if _is_valid_mac(mac):
-                uptime_sec = _parse_mikrotik_uptime(row.get('uptime', ''))
                 addr = (row.get('address') or '').strip()
-                if mac not in macs:
-                    macs[mac] = {'uptime_seconds': uptime_sec, 'address': addr}
-                else:
-                    if uptime_sec < macs[mac]['uptime_seconds']:
-                        macs[mac]['uptime_seconds'] = uptime_sec
-                    if not macs[mac]['address'] and addr:
-                        macs[mac]['address'] = addr
+                if mac not in macs and addr:
+                    macs[mac] = addr
 
-        return sorted(
-            [{'mac': mac, 'uptime_seconds': d['uptime_seconds'], 'address': d['address']} for mac, d in macs.items()],
-            key=lambda c: c['uptime_seconds'],
-        )
+        return [{'mac': mac, 'address': addr} for mac, addr in macs.items()]
     finally:
         if connection:
             try:
@@ -2134,11 +1970,25 @@ async def qr_entry(
     sig: str = "",
     cid: str = "",
 ):
+    """
+    Точка входа с QR-кода.
+
+    Алгоритм:
+      1. Валидация router_id и HMAC-подписи QR-токена.
+      2. Опрос роутера — получаем [{mac, address}] всех клиентов хотспота.
+      3. Ищем MAC по IP входящего HTTP-запроса (_lookup_mac_by_ip).
+         MikroTik назначает каждому клиенту IP, который совпадает с IP
+         HTTP-запроса пользователя. Метод мгновенный и точный при любом
+         числе устройств на роутере.
+      4. Если IP-поиск не дал результата (роутер недоступен, IP-адрес
+         не распознан и т.п.) — показываем qr_entry.html с инструкцией
+         переподключиться к WiFi.
+    """
     cid = (cid or make_cid())[:24]
     router_id = (r or router_id or "").strip()
+
     if not router_id:
         return utf8_json_response({"error": "router_id required"}, status_code=400)
-
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
@@ -2146,57 +1996,39 @@ async def qr_entry(
     if signed_mode and not is_valid_router_qr_signature(router_id, ts, sig):
         return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
 
+    client_ip = get_client_ip(request)
+
+    # Опрос роутера
     poll_error = ""
-    polled_clients = 0
     live_clients: list[dict] = []
     try:
-        live_clients = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
-        polled_clients = _upsert_router_clients_seen(router_id, live_clients, source="qr_entry")
+        live_clients = await asyncio.wait_for(
+            asyncio.to_thread(_collect_router_clients, router_id),
+            timeout=5,
+        )
+        logger.info("[QR] router=%s ip=%s clients=%d cid=%s", router_id, client_ip, len(live_clients), cid)
     except asyncio.TimeoutError:
-        poll_error = "Роутер отвечает слишком долго. Повторите обновление через пару секунд."
+        poll_error = "Роутер отвечает слишком долго."
+        logger.warning("[QR] timeout router=%s cid=%s", router_id, cid)
     except Exception as e:
-        poll_error = f"Не удалось получить список клиентов: {str(e)[:120]}"
+        poll_error = f"Ошибка подключения к роутеру: {str(e)[:120]}"
+        logger.warning("[QR] poll error router=%s cid=%s err=%s", router_id, cid, str(e)[:120])
 
+    # Поиск MAC по IP
     busy_macs = _get_busy_activation_macs(router_id)
+    matched = _lookup_mac_by_ip(live_clients, client_ip, busy_macs)
 
-    # 1) Основной метод: ищем по IP адресу запроса — точно и мгновенно.
-    #    MikroTik хранит address клиента в hotspot/host, IP совпадает с IP HTTP-запроса.
-    client_ip = get_client_ip(request)
-    auto_pick = _lookup_mac_by_ip(live_clients, client_ip, busy_macs)
+    if matched:
+        logger.info("[QR] found mac=%s by ip=%s router=%s cid=%s", matched['mac'][:8] + '***', client_ip, router_id, cid)
+        return RedirectResponse(
+            url=f"/?{urlencode({'mac': matched['mac'], 'router_id': router_id, 'cid': cid})}",
+            status_code=303,
+        )
 
-    # 2) Резерв: uptime — работает если пользователь только что подключился.
-    if not auto_pick:
-        auto_pick = _pick_by_uptime(live_clients, busy_macs)
-
-    # 3) Резерв: кэш БД по временным меткам.
-    if not auto_pick:
-        candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
-        auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
-
-    # 4) Fast-rescan: если всё ещё не нашли — устройство могло появиться только что.
-    if not auto_pick:
-        try:
-            fast_clients = await asyncio.wait_for(
-                asyncio.to_thread(_collect_router_client_macs, router_id),
-                timeout=QR_FAST_RESCAN_TIMEOUT_SECONDS,
-            )
-            _upsert_router_clients_seen(router_id, fast_clients, source="qr_fast_rescan")
-            busy_macs = _get_busy_activation_macs(router_id)
-            auto_pick = _lookup_mac_by_ip(fast_clients, client_ip, busy_macs)
-            if not auto_pick:
-                auto_pick = _pick_by_uptime(fast_clients, busy_macs)
-            if not auto_pick:
-                candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
-                auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
-        except Exception:
-            pass
-
-    if auto_pick:
-        welcome_url = f"/?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}"
-        return RedirectResponse(url=welcome_url, status_code=303)
-
-    candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
-    detection_state = "no_clients" if len(candidates) == 0 else "ambiguous"
+    # Не нашли — показываем страницу с инструкцией
+    detection_state = "no_clients" if not live_clients else "ip_not_found"
+    logger.info("[QR] not found ip=%s router=%s clients=%d state=%s cid=%s",
+                client_ip, router_id, len(live_clients), detection_state, cid)
 
     return templates.TemplateResponse(
         "qr_entry.html",
@@ -2206,10 +2038,7 @@ async def qr_entry(
             "cid": cid,
             "signed_mode": "true" if signed_mode else "false",
             "poll_error": poll_error,
-            "polled_clients": polled_clients,
             "detection_state": detection_state,
-            "narrow_window_seconds": QR_NARROW_LOOKBACK_SECONDS,
-            "full_window_seconds": QR_LOOKBACK_SECONDS,
             "ts": ts,
             "sig": sig,
             "auto_retry_ms": QR_CLIENT_AUTO_RETRY_MS,
@@ -2219,33 +2048,30 @@ async def qr_entry(
 
 @app.get("/q/auto")
 async def qr_auto_pick(request: Request, router_id: str, cid: str = "", ts: str = "", sig: str = ""):
+    """Повторный опрос роутера и попытка определить MAC по IP. Используется кнопкой «Попробовать снова»."""
     cid = (cid or make_cid())[:24]
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
-
-    # Если ссылка подписанная, проверяем подпись и здесь тоже.
     if (sig or ts) and not is_valid_router_qr_signature(router_id, ts, sig):
         return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
 
+    client_ip = get_client_ip(request)
     live_clients: list[dict] = []
     try:
-        live_clients = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
-        _upsert_router_clients_seen(router_id, live_clients, source="qr_auto")
-    except Exception:
-        pass
+        live_clients = await asyncio.wait_for(
+            asyncio.to_thread(_collect_router_clients, router_id),
+            timeout=5,
+        )
+    except Exception as e:
+        logger.warning("[QR/auto] poll error router=%s cid=%s err=%s", router_id, cid, str(e)[:120])
 
-    client_ip = get_client_ip(request)
     busy_macs = _get_busy_activation_macs(router_id)
-    auto_pick = _lookup_mac_by_ip(live_clients, client_ip, busy_macs)
-    if not auto_pick:
-        auto_pick = _pick_by_uptime(live_clients, busy_macs)
-    if not auto_pick:
-        candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
-        auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+    matched = _lookup_mac_by_ip(live_clients, client_ip, busy_macs)
 
-    if auto_pick:
+    if matched:
+        logger.info("[QR/auto] found mac=%s by ip=%s router=%s cid=%s", matched['mac'][:8] + '***', client_ip, router_id, cid)
         return RedirectResponse(
-            url=f"/?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}",
+            url=f"/?{urlencode({'mac': matched['mac'], 'router_id': router_id, 'cid': cid})}",
             status_code=303,
         )
 
@@ -2271,13 +2097,18 @@ async def qr_select_mac(mac: str, router_id: str, cid: str = ""):
     return RedirectResponse(url=tariff_url, status_code=303)
 
 
-@app.get("/api/router/recent_clients")
-async def router_recent_clients(router_id: str, lookback_seconds: int = QR_LOOKBACK_SECONDS):
+@app.get("/api/router/clients")
+async def router_live_clients(router_id: str):
+    """Диагностика: живой список клиентов роутера с IP-адресами (не отображает полные MAC)."""
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
-    lookback_seconds = max(15, min(1800, int(lookback_seconds)))
-    clients = _get_recent_router_clients(router_id, lookback_seconds=lookback_seconds, limit=QR_MAX_CANDIDATES)
-    return utf8_json_response({"ok": True, "router_id": router_id, "lookback_seconds": lookback_seconds, "clients": clients})
+    try:
+        clients = await asyncio.wait_for(asyncio.to_thread(_collect_router_clients, router_id), timeout=8)
+    except Exception as e:
+        return utf8_json_response({"error": str(e)[:200]}, status_code=502)
+    # Маскируем MAC в ответе по соображениям безопасности
+    masked = [{"mac": c['mac'][:8] + '...' + c['mac'][-5:], "address": c.get('address', '')} for c in clients]
+    return utf8_json_response({"ok": True, "router_id": router_id, "count": len(clients), "clients": masked})
 
 
 @app.post("/api/activation/process_pending")

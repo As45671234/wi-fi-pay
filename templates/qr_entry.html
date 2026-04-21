@@ -168,16 +168,17 @@
         <div class="status error">{{ poll_error }}</div>
         {% endif %}
 
-        <a class="btn btn-accent" href="/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Определить мое устройство автоматически</a>
+        <a class="btn btn-accent" href="/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Попробовать снова</a>
 
         {% if detection_state == 'no_clients' %}
         <div class="status error">
-            Вы не подключены к WiFi этого автобуса. Подключитесь к WiFi и нажмите кнопку выше.
+            Вы не подключены к WiFi этого автобуса.<br>
+            Подключитесь к WiFi и нажмите кнопку выше.
         </div>
         {% else %}
         <div class="status">
-            На роутере несколько недавно подключившихся устройств — не можем определить именно ваше.<br><br>
-            <strong>Что делать:</strong> отключитесь от WiFi этого автобуса, подождите 5 секунд, подключитесь снова и нажмите кнопку выше.
+            Вы подключены к WiFi, но роутер не может сопоставить ваш IP-адрес.<br><br>
+            <strong>Что сделать:</strong> отключитесь от WiFi, подождите 5 секунд, подключитесь снова и нажмите кнопку выше.
         </div>
         {% endif %}
         <div class="toolbar">
