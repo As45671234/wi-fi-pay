@@ -172,9 +172,15 @@
         <a class="btn btn-accent" href="/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Определить мое устройство автоматически</a>
 
         {% if not show_candidates %}
+        {% if detection_state == 'no_clients' %}
         <div class="status error">
-            Похоже, вы не подключены к WiFi этого автобуса или устройство пока не обнаружено. Подключитесь к сети в автобусе и нажмите кнопку выше.
+            Мы не видим активных устройств на этом роутере. Скорее всего, вы не подключены к WiFi этого автобуса или открыли QR не от этого автобуса.
         </div>
+        {% else %}
+        <div class="status">
+            Устройства на этом роутере найдены, но сейчас нельзя однозначно определить ваше устройство автоматически. Нажмите "Определить автоматически" еще раз или выберите вручную.
+        </div>
+        {% endif %}
         <div class="toolbar">
             <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Проверить снова</a>
             <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}&show_candidates=1">Выбрать устройство вручную</a>

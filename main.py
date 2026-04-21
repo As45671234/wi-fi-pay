@@ -2075,6 +2075,8 @@ async def qr_entry(
         tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
         return RedirectResponse(url=tariff_url, status_code=303)
 
+    detection_state = "no_clients" if len(candidates) == 0 else "ambiguous"
+
     return templates.TemplateResponse(
         "qr_entry.html",
         {
@@ -2086,6 +2088,7 @@ async def qr_entry(
             "polled_clients": polled_clients,
             "candidates": candidates,
             "show_candidates": bool(int(show_candidates or 0)),
+            "detection_state": detection_state,
             "narrow_window_seconds": QR_NARROW_LOOKBACK_SECONDS,
             "full_window_seconds": QR_LOOKBACK_SECONDS,
             "ts": ts,
