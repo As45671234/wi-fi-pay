@@ -125,6 +125,14 @@
             background: #eff6ff;
             color: #1e40af;
         }
+        .btn-accent {
+            background: #2563eb;
+            color: #fff;
+            width: 100%;
+            margin: 4px 0 14px;
+            font-size: 15px;
+            padding: 12px 16px;
+        }
         .toolbar {
             margin-top: 16px;
             display: flex;
@@ -161,13 +169,24 @@
         <div class="status">Обновлено с роутера: {{ polled_clients }} MAC. Узкое окно авто-выбора: {{ narrow_window_seconds }} сек. Полное окно списка: {{ full_window_seconds }} сек.</div>
         {% endif %}
 
-        {% if candidates and candidates|length > 0 %}
+        <a class="btn btn-accent" href="/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Определить мое устройство автоматически</a>
+
+        {% if not show_candidates %}
+        <div class="status error">
+            Похоже, вы не подключены к WiFi этого автобуса или устройство пока не обнаружено. Подключитесь к сети в автобусе и нажмите кнопку выше.
+        </div>
+        <div class="toolbar">
+            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Проверить снова</a>
+            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}&show_candidates=1">Выбрать устройство вручную</a>
+            <a class="btn btn-light" href="/landing">На лендинг</a>
+        </div>
+        {% elif candidates and candidates|length > 0 %}
         <ul class="list">
             {% for c in candidates %}
             <li class="item">
                 <div>
                     <p class="mac">{{ c.masked_mac }}</p>
-                    <p class="meta">Последняя активность: {{ c.last_seen }} | Наблюдений: {{ c.seen_count }}{% if c.busy %} | Активация уже выполняется{% endif %}</p>
+                    <p class="meta">Последняя активность: {{ c.last_seen }} | Первое появление: {{ c.first_seen }} | Наблюдений: {{ c.seen_count }}{% if c.busy %} | Активация уже выполняется{% endif %}</p>
                 </div>
                 {% if c.busy %}
                 <button class="btn btn-light" type="button" disabled>Устройство уже обрабатывается</button>
@@ -184,11 +203,20 @@
         {% endif %}
 
         <div class="toolbar">
-            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Обновить список</a>
+            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}&show_candidates={{ 1 if show_candidates else 0 }}">Обновить список</a>
             <a class="btn btn-light" href="/landing">На лендинг</a>
         </div>
 
         <p class="muted">CID: {{ cid }} | Router: {{ router_id }}</p>
     </main>
+
+    {% if not show_candidates %}
+    <script>
+        // По умолчанию пытаемся автоопределить устройство без ручного выбора.
+        setTimeout(function() {
+            window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
+        }, 5000);
+    </script>
+    {% endif %}
 </body>
 </html>

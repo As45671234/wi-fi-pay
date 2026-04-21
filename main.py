@@ -190,6 +190,7 @@ QR_LOOKBACK_SECONDS = max(15, int(os.getenv("QR_LOOKBACK_SECONDS", "120") or "12
 QR_MAX_CANDIDATES = max(1, int(os.getenv("QR_MAX_CANDIDATES", "8") or "8"))
 QR_TOKEN_SECRET = os.getenv("QR_TOKEN_SECRET") or SECRET_KEY
 QR_NARROW_LOOKBACK_SECONDS = max(15, int(os.getenv("QR_NARROW_LOOKBACK_SECONDS", "45") or "45"))
+QR_FRESH_FIRST_SEEN_SECONDS = max(20, int(os.getenv("QR_FRESH_FIRST_SEEN_SECONDS", "90") or "90"))
 
 PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS = max(2, int(os.getenv("PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS", "5") or "5"))
 PENDING_ACTIVATION_RETRY_DELAY_SECONDS = max(5, int(os.getenv("PENDING_ACTIVATION_RETRY_DELAY_SECONDS", "20") or "20"))
@@ -490,7 +491,7 @@ def _get_recent_router_clients(router_id: str, lookback_seconds: int = QR_LOOKBA
     try:
         rows = conn.execute(
             """
-            SELECT mac_address, last_seen, seen_count
+                        SELECT mac_address, first_seen, last_seen, seen_count
             FROM router_clients_seen
             WHERE router_id = ?
               AND last_seen > datetime('now', ?)
@@ -506,6 +507,7 @@ def _get_recent_router_clients(router_id: str, lookback_seconds: int = QR_LOOKBA
                 {
                     "mac": mac,
                     "masked_mac": _mask_mac(mac),
+                    "first_seen": row["first_seen"],
                     "last_seen": row["last_seen"],
                     "seen_count": int(row["seen_count"] or 0),
                 }
@@ -513,6 +515,44 @@ def _get_recent_router_clients(router_id: str, lookback_seconds: int = QR_LOOKBA
         return result
     finally:
         conn.close()
+
+
+def _is_recent_sqlite_ts(ts: str | None, within_seconds: int) -> bool:
+    if not ts:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).replace(tzinfo=None)
+        return (datetime.utcnow() - dt).total_seconds() <= max(1, int(within_seconds))
+    except Exception:
+        return False
+
+
+def _pick_best_qr_candidate(candidates: list[dict], busy_macs: set[str]) -> dict | None:
+    free = [c for c in candidates if c.get("mac") not in busy_macs]
+    if not free:
+        return None
+
+    # Лучший UX: если есть ровно один "свежий" клиент, считаем его пользователем.
+    fresh = [
+        c for c in free
+        if _is_recent_sqlite_ts(c.get("first_seen"), QR_FRESH_FIRST_SEEN_SECONDS)
+    ]
+    if len(fresh) == 1:
+        return fresh[0]
+
+    # Второй приоритет: единственный клиент в узком окне активности.
+    narrow = [
+        c for c in free
+        if _is_recent_sqlite_ts(c.get("last_seen"), QR_NARROW_LOOKBACK_SECONDS)
+    ]
+    if len(narrow) == 1:
+        return narrow[0]
+
+    # Третий приоритет: если вообще остался один свободный кандидат.
+    if len(free) == 1:
+        return free[0]
+
+    return None
 
 
 def _collect_router_client_macs(router_id: str) -> list[str]:
@@ -1999,6 +2039,7 @@ async def qr_entry(
     ts: str = "",
     sig: str = "",
     cid: str = "",
+    show_candidates: int = 0,
 ):
     cid = (cid or make_cid())[:24]
     router_id = (r or router_id or "").strip()
@@ -2022,17 +2063,15 @@ async def qr_entry(
     except Exception as e:
         poll_error = f"Не удалось получить список клиентов: {str(e)[:120]}"
 
-    narrow_candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_NARROW_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     busy_macs = _get_busy_activation_macs(router_id)
     for c in candidates:
         c["busy"] = (c["mac"] in busy_macs)
 
-    narrow_free = [c for c in narrow_candidates if c["mac"] not in busy_macs]
-
-    # Удобный auto-flow: если найден только 1 клиент в окне, сразу ведем к тарифам.
-    if len(narrow_free) == 1:
-        mac = narrow_free[0]["mac"]
+    # Умный auto-flow: пытаемся выбрать лучший кандидат без участия пользователя.
+    auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+    if auto_pick:
+        mac = auto_pick["mac"]
         tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
         return RedirectResponse(url=tariff_url, status_code=303)
 
@@ -2046,11 +2085,43 @@ async def qr_entry(
             "poll_error": poll_error,
             "polled_clients": polled_clients,
             "candidates": candidates,
+            "show_candidates": bool(int(show_candidates or 0)),
             "narrow_window_seconds": QR_NARROW_LOOKBACK_SECONDS,
             "full_window_seconds": QR_LOOKBACK_SECONDS,
             "ts": ts,
             "sig": sig,
         },
+    )
+
+
+@app.get("/q/auto")
+async def qr_auto_pick(router_id: str, cid: str = "", ts: str = "", sig: str = ""):
+    cid = (cid or make_cid())[:24]
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    # Если ссылка подписанная, проверяем подпись и здесь тоже.
+    if (sig or ts) and not is_valid_router_qr_signature(router_id, ts, sig):
+        return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
+
+    try:
+        macs = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
+        _upsert_router_clients_seen(router_id, macs, source="qr_auto")
+    except Exception:
+        pass
+
+    candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+    busy_macs = _get_busy_activation_macs(router_id)
+    auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+    if auto_pick:
+        return RedirectResponse(
+            url=f"/tariffs?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        url=f"/q?{urlencode({'router_id': router_id, 'cid': cid, 'ts': ts, 'sig': sig})}",
+        status_code=303,
     )
 
 
