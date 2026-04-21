@@ -185,11 +185,12 @@ TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
 PREPARE_TIMEOUT_SECONDS = 10
-# --- QR-флоу: определение MAC по IP ---
+# --- QR-флоу: определение MAC ---
 QR_TOKEN_TTL_SECONDS = max(60, int(os.getenv("QR_TOKEN_TTL_SECONDS", str(60 * 60 * 24 * 365)) or str(60 * 60 * 24 * 365)))
 QR_TOKEN_SECRET = os.getenv("QR_TOKEN_SECRET") or SECRET_KEY
 # Интервал автоповтора на странице ошибки (в миллисекундах)
-QR_CLIENT_AUTO_RETRY_MS = max(800, int(os.getenv("QR_CLIENT_AUTO_RETRY_MS", "1500") or "1500"))
+QR_CLIENT_AUTO_RETRY_MS = max(700, int(os.getenv("QR_CLIENT_AUTO_RETRY_MS", "1200") or "1200"))
+QR_CLIENT_FIRST_RETRY_MS = max(200, int(os.getenv("QR_CLIENT_FIRST_RETRY_MS", "350") or "350"))
 
 PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS = max(2, int(os.getenv("PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS", "5") or "5"))
 PENDING_ACTIVATION_RETRY_DELAY_SECONDS = max(5, int(os.getenv("PENDING_ACTIVATION_RETRY_DELAY_SECONDS", "20") or "20"))
@@ -467,7 +468,14 @@ def is_valid_router_qr_signature(router_id: str, ts: str, sig: str) -> bool:
 _DEVICE_COOKIE_NAME = "wf_dev"
 _DEVICE_COOKIE_TTL_DAYS = 30
 QR_FALLBACK_MAX_IDLE_SECONDS = max(5, int(os.getenv("QR_FALLBACK_MAX_IDLE_SECONDS", "15")))
-QR_FALLBACK_POLL_TIMEOUT_SECONDS = max(2.0, float(os.getenv("QR_FALLBACK_POLL_TIMEOUT_SECONDS", "4")))
+QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS = max(
+    0.8,
+    float(os.getenv("QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS", os.getenv("QR_FALLBACK_POLL_TIMEOUT_SECONDS", "1.2"))),
+)
+QR_FALLBACK_POLL_TIMEOUT_AUTO_SECONDS = max(
+    1.2,
+    float(os.getenv("QR_FALLBACK_POLL_TIMEOUT_AUTO_SECONDS", os.getenv("QR_FALLBACK_POLL_TIMEOUT_SECONDS", "2.8"))),
+)
 
 
 def _make_device_cookie(mac: str, router_id: str) -> str:
@@ -2114,13 +2122,35 @@ async def qr_entry(
         logger.info("[QR] cookie mismatch (cookie_router=%s qr_router=%s) cid=%s",
                     router_from_cookie, router_id, cid)
 
+    # Если cookie от другого роутера, показываем экран сразу (без блокирующего опроса роутера).
+    if cookie_data and cookie_data[1] != router_id:
+        fallback_reason = "cookie_router_mismatch"
+        logger.info("[QR] no mac state=wrong_router fallback=%s router=%s cid=%s", fallback_reason, router_id, cid)
+        resp = templates.TemplateResponse(
+            "qr_entry.html",
+            {
+                "request": request,
+                "router_id": router_id,
+                "cid": cid,
+                "signed_mode": "true" if signed_mode else "false",
+                "detection_state": "wrong_router",
+                "fallback_reason": fallback_reason,
+                "ts": ts,
+                "sig": sig,
+                "auto_retry_ms": QR_CLIENT_AUTO_RETRY_MS,
+                "first_retry_ms": QR_CLIENT_FIRST_RETRY_MS,
+            },
+        )
+        resp.delete_cookie(_DEVICE_COOKIE_NAME)
+        return resp
+
     # 2) Безопасный fallback по hotspot/host: только если кандидат один и свежий
     busy_macs = _get_busy_activation_macs(router_id)
     fallback_reason = "not_tried"
     try:
         fallback_mac, fallback_reason = await asyncio.wait_for(
             asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
-            timeout=QR_FALLBACK_POLL_TIMEOUT_SECONDS,
+            timeout=QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS,
         )
     except asyncio.TimeoutError:
         fallback_mac, fallback_reason = None, "router_timeout"
@@ -2165,6 +2195,7 @@ async def qr_entry(
             "ts": ts,
             "sig": sig,
             "auto_retry_ms": QR_CLIENT_AUTO_RETRY_MS,
+            "first_retry_ms": QR_CLIENT_FIRST_RETRY_MS,
         },
     )
     # Если роутер другой — сбрасываем устаревшую cookie
@@ -2197,7 +2228,7 @@ async def qr_auto_pick(request: Request, router_id: str, cid: str = "", ts: str 
     try:
         fallback_mac, fallback_reason = await asyncio.wait_for(
             asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
-            timeout=QR_FALLBACK_POLL_TIMEOUT_SECONDS,
+            timeout=QR_FALLBACK_POLL_TIMEOUT_AUTO_SECONDS,
         )
     except asyncio.TimeoutError:
         fallback_mac, fallback_reason = None, "router_timeout"

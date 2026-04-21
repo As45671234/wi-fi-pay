@@ -197,7 +197,11 @@
     </main>
 
     <script>
-        // Повторяем проверку — возможно cookie уже установлена
+        // Быстрый первый повтор и далее регулярный опрос.
+        setTimeout(function() {
+            window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
+        }, {{ first_retry_ms or 350 }});
+
         var retryInterval = setInterval(function() {
             window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
         }, {{ auto_retry_ms }});
