@@ -458,13 +458,28 @@ def _mask_mac(mac: str) -> str:
     return f"{parts[0]}:{parts[1]}:..:{parts[4]}:{parts[5]}"
 
 
-def _upsert_router_clients_seen(router_id: str, macs: list[str], source: str = "router_poll") -> int:
-    if not macs:
+def _parse_mikrotik_uptime(s: str) -> int:
+    """Parse MikroTik uptime string like '1h2m3s', '5m30s', '45s' → seconds.
+    Returns 9_999_999 when the string is empty or unparseable (treated as very old connection).
+    """
+    if not s:
+        return 9_999_999
+    total = 0
+    for m in re.finditer(r'(\d+)([wdhms])', s.lower()):
+        v, u = int(m.group(1)), m.group(2)
+        total += v * {'w': 604800, 'd': 86400, 'h': 3600, 'm': 60, 's': 1}[u]
+    return total if total > 0 else 9_999_999
+
+
+def _upsert_router_clients_seen(router_id: str, macs: list, source: str = "router_poll") -> int:
+    # Accept list[str] or list[dict] with 'mac' key (from _collect_router_client_macs)
+    mac_list = [m['mac'] if isinstance(m, dict) else m for m in macs]
+    if not mac_list:
         return 0
     conn = get_db()
     inserted = 0
     try:
-        for mac in macs:
+        for mac in mac_list:
             mac_norm = _normalize_mac(mac)
             if not _is_valid_mac(mac_norm):
                 continue
@@ -573,7 +588,57 @@ def _pick_best_qr_candidate(candidates: list[dict], busy_macs: set[str]) -> dict
     return None
 
 
-def _collect_router_client_macs(router_id: str) -> list[str]:
+# Максимальный аптайм (в секундах) при котором считаем устройство "только что подключившимся".
+# Пользователь сканирует QR сразу после подключения → аптайм < 5 минут.
+QR_FRESH_UPTIME_SECONDS = 300
+# Минимальное преимущество самого свежего устройства над следующим (секунды).
+QR_UPTIME_GAP_SECONDS = 30
+
+
+def _pick_by_uptime(live_clients: list[dict], busy_macs: set[str]) -> dict | None:
+    """Выбрать устройство пользователя по uptime из MikroTik (живые данные).
+
+    Логика: пользователь только что подключился к WiFi, поэтому его uptime НАИМЕНЬШИЙ.
+    Сортируем по uptime по возрастанию. Если первый клиент явно свежее остальных — это он.
+    """
+    free = [c for c in live_clients if c.get('mac') not in busy_macs]
+    if not free:
+        return None
+
+    # Отсортированы по возрастанию uptime (функция _collect_router_client_macs уже сортирует,
+    # но сортируем ещё раз для надёжности)
+    sorted_clients = sorted(free, key=lambda c: c.get('uptime_seconds', 9_999_999))
+
+    freshest_uptime = sorted_clients[0].get('uptime_seconds', 9_999_999)
+
+    # Устройство подключено давно — пользователь не мог только что прийти
+    if freshest_uptime > QR_FRESH_UPTIME_SECONDS:
+        return None
+
+    # Единственный клиент вообще → точно он
+    if len(sorted_clients) == 1:
+        return sorted_clients[0]
+
+    second_uptime = sorted_clients[1].get('uptime_seconds', 9_999_999)
+    gap = second_uptime - freshest_uptime
+
+    # Самое свежее устройство подключилось на QR_UPTIME_GAP_SECONDS секунд раньше следующего
+    if gap >= QR_UPTIME_GAP_SECONDS:
+        return sorted_clients[0]
+
+    # Оба устройства подключились почти одновременно (< 15 сек разница) и оба очень свежие
+    # (< 60 сек) → скорее всего один пользователь с двумя интерфейсами, берём первый
+    if freshest_uptime < 60 and second_uptime < 60:
+        return sorted_clients[0]
+
+    return None
+
+
+def _collect_router_client_macs(router_id: str) -> list[dict]:
+    """Return [{mac, uptime_seconds}] for all hotspot clients, sorted by uptime ascending.
+    uptime_seconds is how long the device has been on this router's hotspot — the user
+    who just connected will have the SMALLEST value.
+    """
     config = ROUTERS_CONFIG.get(router_id)
     if not config:
         return []
@@ -595,18 +660,26 @@ def _collect_router_client_macs(router_id: str) -> list[str]:
         host_res = api.get_resource('/ip/hotspot/host')
         active_res = api.get_resource('/ip/hotspot/active')
 
-        macs: set[str] = set()
+        # mac → minimum uptime_seconds seen across host + active tables
+        macs: dict[str, int] = {}
+
         for row in host_res.call('print'):
             mac = _normalize_mac(row.get('mac-address', ''))
             if _is_valid_mac(mac):
-                macs.add(mac)
+                uptime_sec = _parse_mikrotik_uptime(row.get('uptime', ''))
+                macs[mac] = min(macs.get(mac, 9_999_999), uptime_sec)
 
         for row in active_res.call('print'):
             mac = _normalize_mac(row.get('mac-address', ''))
             if _is_valid_mac(mac):
-                macs.add(mac)
+                uptime_sec = _parse_mikrotik_uptime(row.get('uptime', ''))
+                macs[mac] = min(macs.get(mac, 9_999_999), uptime_sec)
 
-        return sorted(macs)
+        # Sort ascending so freshest (smallest uptime) is first
+        return sorted(
+            [{'mac': mac, 'uptime_seconds': us} for mac, us in macs.items()],
+            key=lambda c: c['uptime_seconds'],
+        )
     finally:
         if connection:
             try:
@@ -2072,30 +2145,39 @@ async def qr_entry(
 
     poll_error = ""
     polled_clients = 0
+    live_clients: list[dict] = []
     try:
-        macs = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
-        polled_clients = _upsert_router_clients_seen(router_id, macs, source="qr_entry")
+        live_clients = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
+        polled_clients = _upsert_router_clients_seen(router_id, live_clients, source="qr_entry")
     except asyncio.TimeoutError:
         poll_error = "Роутер отвечает слишком долго. Повторите обновление через пару секунд."
     except Exception as e:
         poll_error = f"Не удалось получить список клиентов: {str(e)[:120]}"
 
-    candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     busy_macs = _get_busy_activation_macs(router_id)
-    auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
 
-    # Fast-path: если сразу не нашли, делаем короткий доп. перескан без ожидания пользователя.
-    # Это сокращает время определения в моменты, когда устройство только что присоединилось к WiFi.
+    # 1) Основной сигнал: uptime из MikroTik (мгновенно, без эвристики по времени в БД).
+    #    Пользователь только что подключился → его uptime НАИМЕНЬШИЙ среди всех клиентов.
+    auto_pick = _pick_by_uptime(live_clients, busy_macs)
+
+    # 2) Запасной сигнал: если uptime недоступен или неоднозначен — смотрим кэш БД.
+    if not auto_pick:
+        candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+        auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+
+    # 3) Fast-rescan: если всё ещё не нашли — возможно устройство появилось долю секунды назад.
     if not auto_pick:
         try:
-            fast_macs = await asyncio.wait_for(
+            fast_clients = await asyncio.wait_for(
                 asyncio.to_thread(_collect_router_client_macs, router_id),
                 timeout=QR_FAST_RESCAN_TIMEOUT_SECONDS,
             )
-            _upsert_router_clients_seen(router_id, fast_macs, source="qr_fast_rescan")
-            candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+            _upsert_router_clients_seen(router_id, fast_clients, source="qr_fast_rescan")
             busy_macs = _get_busy_activation_macs(router_id)
-            auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+            auto_pick = _pick_by_uptime(fast_clients, busy_macs)
+            if not auto_pick:
+                candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+                auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
         except Exception:
             pass
 
@@ -2103,6 +2185,7 @@ async def qr_entry(
         welcome_url = f"/?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}"
         return RedirectResponse(url=welcome_url, status_code=303)
 
+    candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     detection_state = "no_clients" if len(candidates) == 0 else "ambiguous"
 
     return templates.TemplateResponse(
@@ -2134,15 +2217,19 @@ async def qr_auto_pick(router_id: str, cid: str = "", ts: str = "", sig: str = "
     if (sig or ts) and not is_valid_router_qr_signature(router_id, ts, sig):
         return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
 
+    live_clients: list[dict] = []
     try:
-        macs = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
-        _upsert_router_clients_seen(router_id, macs, source="qr_auto")
+        live_clients = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
+        _upsert_router_clients_seen(router_id, live_clients, source="qr_auto")
     except Exception:
         pass
 
-    candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     busy_macs = _get_busy_activation_macs(router_id)
-    auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+    auto_pick = _pick_by_uptime(live_clients, busy_macs)
+    if not auto_pick:
+        candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+        auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+
     if auto_pick:
         return RedirectResponse(
             url=f"/?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}",
