@@ -527,20 +527,46 @@ def _is_recent_sqlite_ts(ts: str | None, within_seconds: int) -> bool:
         return False
 
 
+def _sqlite_ts_to_dt(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
 def _pick_best_qr_candidate(candidates: list[dict], busy_macs: set[str]) -> dict | None:
     free = [c for c in candidates if c.get("mac") not in busy_macs]
     if not free:
         return None
 
-    # Безопасный режим: выбираем только "свежий" и однозначный кандидат.
-    fresh = [
+    # 1) Самый надежный кейс: ровно один активный MAC в узком окне.
+    narrow = [
         c for c in free
-        if _is_recent_sqlite_ts(c.get("first_seen"), QR_FRESH_FIRST_SEEN_SECONDS)
-        and _is_recent_sqlite_ts(c.get("last_seen"), QR_NARROW_LOOKBACK_SECONDS)
-        and int(c.get("seen_count") or 0) <= 8
+        if _is_recent_sqlite_ts(c.get("last_seen"), QR_NARROW_LOOKBACK_SECONDS)
     ]
-    if len(fresh) == 1:
-        return fresh[0]
+    if len(narrow) == 1:
+        return narrow[0]
+
+    # 2) Если есть явный лидер по свежести, выбираем его.
+    free_sorted = sorted(
+        free,
+        key=lambda c: _sqlite_ts_to_dt(c.get("last_seen")) or datetime.min,
+        reverse=True,
+    )
+
+    if len(free_sorted) >= 2:
+        top_dt = _sqlite_ts_to_dt(free_sorted[0].get("last_seen"))
+        second_dt = _sqlite_ts_to_dt(free_sorted[1].get("last_seen"))
+        if top_dt and second_dt:
+            delta = (top_dt - second_dt).total_seconds()
+            if delta >= 45 and _is_recent_sqlite_ts(free_sorted[0].get("last_seen"), QR_LOOKBACK_SECONDS):
+                return free_sorted[0]
+
+    # 3) Если свободный кандидат один, но чуть старее узкого окна, тоже берем его.
+    if len(free_sorted) == 1 and _is_recent_sqlite_ts(free_sorted[0].get("last_seen"), QR_LOOKBACK_SECONDS):
+        return free_sorted[0]
 
     return None
 
