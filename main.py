@@ -185,6 +185,15 @@ TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 TRIAL_RATE_BUCKET = {}
 PREPARE_TIMEOUT_SECONDS = 10
+QR_TOKEN_TTL_SECONDS = max(60, int(os.getenv("QR_TOKEN_TTL_SECONDS", str(60 * 60 * 24 * 365)) or str(60 * 60 * 24 * 365)))
+QR_LOOKBACK_SECONDS = max(15, int(os.getenv("QR_LOOKBACK_SECONDS", "120") or "120"))
+QR_MAX_CANDIDATES = max(1, int(os.getenv("QR_MAX_CANDIDATES", "8") or "8"))
+QR_TOKEN_SECRET = os.getenv("QR_TOKEN_SECRET") or SECRET_KEY
+QR_NARROW_LOOKBACK_SECONDS = max(15, int(os.getenv("QR_NARROW_LOOKBACK_SECONDS", "45") or "45"))
+
+PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS = max(2, int(os.getenv("PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS", "5") or "5"))
+PENDING_ACTIVATION_RETRY_DELAY_SECONDS = max(5, int(os.getenv("PENDING_ACTIVATION_RETRY_DELAY_SECONDS", "20") or "20"))
+PENDING_ACTIVATION_MAX_ATTEMPTS = max(1, int(os.getenv("PENDING_ACTIVATION_MAX_ATTEMPTS", "5") or "5"))
 
 KASPI_ENABLED = (os.getenv("KASPI_ENABLED", "false").strip().lower() == "true")
 KASPI_API_BASE_URL = os.getenv("KASPI_API_BASE_URL", "").strip()
@@ -217,6 +226,8 @@ kaspi_sync_task: asyncio.Task | None = None
 kaspi_sync_stop = asyncio.Event()
 kaspi_sync_lock = asyncio.Lock()
 kaspi_activation_db_lock = threading.Lock()
+pending_activation_task: asyncio.Task | None = None
+pending_activation_stop = asyncio.Event()
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -292,6 +303,40 @@ def init_db():
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_kaspi_orders_kaspi_order_id ON kaspi_orders(kaspi_order_id) WHERE kaspi_order_id IS NOT NULL AND kaspi_order_id <> ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_kaspi_orders_status ON kaspi_orders(kaspi_status, is_activated)")
 
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS router_clients_seen (
+            router_id TEXT NOT NULL,
+            mac_address TEXT NOT NULL,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            seen_count INTEGER NOT NULL DEFAULT 1,
+            source TEXT DEFAULT 'router_poll',
+            PRIMARY KEY (router_id, mac_address)
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_router_clients_seen_router_time ON router_clients_seen(router_id, last_seen DESC)")
+
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pending_activations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            router_id TEXT NOT NULL,
+            mac_address TEXT NOT NULL,
+            amount INTEGER NOT NULL DEFAULT 0,
+            minutes INTEGER NOT NULL DEFAULT 0,
+            payment_order_id TEXT,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            last_attempt_at TIMESTAMP,
+            activated_at TIMESTAMP,
+            next_retry_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_activations_status ON pending_activations(status, router_id, created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_activations_retry ON pending_activations(status, next_retry_at, created_at)")
+
     cursor.execute("PRAGMA table_info(kaspi_orders)")
     k_columns = {row[1] for row in cursor.fetchall()}
     if 'external_order_ref' not in k_columns:
@@ -304,6 +349,19 @@ def init_db():
         conn.execute("ALTER TABLE kaspi_orders ADD COLUMN activation_error TEXT")
     if 'last_activation_attempt_at' not in k_columns:
         conn.execute("ALTER TABLE kaspi_orders ADD COLUMN last_activation_attempt_at TIMESTAMP")
+
+    cursor.execute("PRAGMA table_info(pending_activations)")
+    p_columns = {row[1] for row in cursor.fetchall()}
+    if 'attempts' not in p_columns:
+        conn.execute("ALTER TABLE pending_activations ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+    if 'last_error' not in p_columns:
+        conn.execute("ALTER TABLE pending_activations ADD COLUMN last_error TEXT")
+    if 'last_attempt_at' not in p_columns:
+        conn.execute("ALTER TABLE pending_activations ADD COLUMN last_attempt_at TIMESTAMP")
+    if 'activated_at' not in p_columns:
+        conn.execute("ALTER TABLE pending_activations ADD COLUMN activated_at TIMESTAMP")
+    if 'next_retry_at' not in p_columns:
+        conn.execute("ALTER TABLE pending_activations ADD COLUMN next_retry_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
     conn.commit()
     conn.close()
@@ -366,6 +424,373 @@ def is_valid_trial_signature(mac: str, router_id: str, trial_ts: str, trial_sig:
         return False
     expected = make_trial_signature(mac, router_id, trial_ts)
     return hmac.compare_digest(expected, trial_sig.lower())
+
+
+def make_router_qr_signature(router_id: str, ts: str) -> str:
+    payload = f"{router_id}|{ts}"
+    return hmac.new(QR_TOKEN_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def is_valid_router_qr_signature(router_id: str, ts: str, sig: str) -> bool:
+    if not router_id or router_id not in ROUTERS_CONFIG:
+        return False
+    if not ts or not re.fullmatch(r"\d{10}", ts):
+        return False
+    if not sig or not re.fullmatch(r"[0-9a-fA-F]{64}", sig):
+        return False
+
+    now = int(time.time())
+    if abs(now - int(ts)) > QR_TOKEN_TTL_SECONDS:
+        return False
+
+    expected = make_router_qr_signature(router_id, ts)
+    return hmac.compare_digest(expected, sig.lower())
+
+
+def _mask_mac(mac: str) -> str:
+    raw = (mac or "").upper()
+    if not _is_valid_mac(raw):
+        return "—"
+    parts = raw.split(":")
+    return f"{parts[0]}:{parts[1]}:..:{parts[4]}:{parts[5]}"
+
+
+def _upsert_router_clients_seen(router_id: str, macs: list[str], source: str = "router_poll") -> int:
+    if not macs:
+        return 0
+    conn = get_db()
+    inserted = 0
+    try:
+        for mac in macs:
+            mac_norm = _normalize_mac(mac)
+            if not _is_valid_mac(mac_norm):
+                continue
+            conn.execute(
+                """
+                INSERT INTO router_clients_seen (router_id, mac_address, first_seen, last_seen, seen_count, source)
+                VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, ?)
+                ON CONFLICT(router_id, mac_address)
+                DO UPDATE SET
+                    last_seen = CURRENT_TIMESTAMP,
+                    seen_count = seen_count + 1,
+                    source = excluded.source
+                """,
+                (router_id, mac_norm, source),
+            )
+            inserted += 1
+        conn.commit()
+        return inserted
+    finally:
+        conn.close()
+
+
+def _get_recent_router_clients(router_id: str, lookback_seconds: int = QR_LOOKBACK_SECONDS, limit: int = QR_MAX_CANDIDATES) -> list[dict]:
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT mac_address, last_seen, seen_count
+            FROM router_clients_seen
+            WHERE router_id = ?
+              AND last_seen > datetime('now', ?)
+            ORDER BY last_seen DESC
+            LIMIT ?
+            """,
+            (router_id, f"-{int(lookback_seconds)} seconds", int(limit)),
+        ).fetchall()
+        result = []
+        for row in rows:
+            mac = row["mac_address"]
+            result.append(
+                {
+                    "mac": mac,
+                    "masked_mac": _mask_mac(mac),
+                    "last_seen": row["last_seen"],
+                    "seen_count": int(row["seen_count"] or 0),
+                }
+            )
+        return result
+    finally:
+        conn.close()
+
+
+def _collect_router_client_macs(router_id: str) -> list[str]:
+    config = ROUTERS_CONFIG.get(router_id)
+    if not config:
+        return []
+
+    api_port = int(config.get("port", 8728))
+    if not _router_api_reachable(config["ip"], api_port):
+        raise RuntimeError(f"Router API unavailable: {router_id} ({config['ip']}:{api_port})")
+
+    connection = None
+    try:
+        connection = routeros_api.RouterOsApiPool(
+            config["ip"],
+            username=config["user"],
+            password=config["pass"],
+            port=api_port,
+            plaintext_login=True,
+        )
+        api = connection.get_api()
+        host_res = api.get_resource('/ip/hotspot/host')
+        active_res = api.get_resource('/ip/hotspot/active')
+
+        macs: set[str] = set()
+        for row in host_res.call('print'):
+            mac = _normalize_mac(row.get('mac-address', ''))
+            if _is_valid_mac(mac):
+                macs.add(mac)
+
+        for row in active_res.call('print'):
+            mac = _normalize_mac(row.get('mac-address', ''))
+            if _is_valid_mac(mac):
+                macs.add(mac)
+
+        return sorted(macs)
+    finally:
+        if connection:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
+
+
+def _enqueue_pending_activation(router_id: str, mac: str, amount: int, minutes: int, payment_order_id: str = "") -> int:
+    mac_norm = _normalize_mac(mac)
+    if not _is_valid_mac(mac_norm):
+        raise ValueError("Некорректный MAC")
+    if router_id not in ROUTERS_CONFIG:
+        raise ValueError("Неизвестный роутер")
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            """
+            SELECT id FROM pending_activations
+            WHERE router_id = ?
+              AND mac_address = ?
+              AND status IN ('PENDING', 'PROCESSING', 'RETRY')
+              AND created_at > datetime('now', '-30 minutes')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (router_id, mac_norm),
+        ).fetchone()
+        if row:
+            return int(row[0])
+
+        cur = conn.execute(
+            """
+            INSERT INTO pending_activations (
+                router_id, mac_address, amount, minutes, payment_order_id, status,
+                attempts, next_retry_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'PENDING', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (router_id, mac_norm, int(amount), int(minutes), payment_order_id or ""),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
+
+
+def _claim_next_pending_activation() -> sqlite3.Row | None:
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        candidates = conn.execute(
+            """
+            SELECT id, router_id, mac_address, amount, minutes, payment_order_id, status, attempts
+            FROM pending_activations
+            WHERE status IN ('PENDING', 'RETRY')
+              AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP)
+            ORDER BY created_at ASC
+            LIMIT 10
+            """
+        ).fetchall()
+
+        for row in candidates:
+            updated = conn.execute(
+                """
+                UPDATE pending_activations
+                SET status = 'PROCESSING',
+                    last_attempt_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND status = ?
+                """,
+                (int(row["id"]), row["status"]),
+            ).rowcount
+            if updated == 1:
+                conn.commit()
+                return row
+
+        conn.commit()
+        return None
+    finally:
+        conn.close()
+
+
+def _finalize_pending_activation(row_id: int, ok: bool, error_text: str = "") -> None:
+    conn = get_db()
+    try:
+        if ok:
+            conn.execute(
+                """
+                UPDATE pending_activations
+                SET status = 'DONE',
+                    activated_at = CURRENT_TIMESTAMP,
+                    last_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (int(row_id),),
+            )
+        else:
+            row = conn.execute("SELECT attempts FROM pending_activations WHERE id = ?", (int(row_id),)).fetchone()
+            attempts = int((row[0] if row else 0) or 0) + 1
+            failed = attempts >= PENDING_ACTIVATION_MAX_ATTEMPTS
+            next_retry_expr = f"+{PENDING_ACTIVATION_RETRY_DELAY_SECONDS} seconds"
+            conn.execute(
+                """
+                UPDATE pending_activations
+                SET status = ?,
+                    attempts = ?,
+                    last_error = ?,
+                    next_retry_at = CASE WHEN ? = 'FAILED' THEN NULL ELSE datetime('now', ?) END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    "FAILED" if failed else "RETRY",
+                    attempts,
+                    (error_text or "Activation failed")[:500],
+                    "FAILED" if failed else "RETRY",
+                    next_retry_expr,
+                    int(row_id),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _mark_order_paid_from_activation(router_id: str, mac: str, amount: int, minutes: int, payment_order_id: str = "") -> None:
+    paid_expires_at = (datetime.utcnow() + timedelta(minutes=int(minutes))).isoformat()
+    conn = get_db()
+    try:
+        updated = 0
+        if payment_order_id:
+            updated = conn.execute(
+                """
+                UPDATE orders
+                SET status = 'PAID', amount = ?, mac_address = ?, router_id = ?, expires_at = ?
+                WHERE payment_order_id = ?
+                """,
+                (int(amount), mac, router_id, paid_expires_at, payment_order_id),
+            ).rowcount
+
+        if not updated:
+            updated = conn.execute(
+                """
+                UPDATE orders
+                SET status = 'PAID', amount = ?, router_id = ?, expires_at = ?
+                WHERE id = (
+                    SELECT id FROM orders
+                    WHERE mac_address = ?
+                      AND router_id = ?
+                      AND status IN ('PAYMENT_INITIATED', 'PAY_WINDOW', 'PAYMENT_CONFIRMED', 'PAID')
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+                """,
+                (int(amount), router_id, paid_expires_at, mac, router_id),
+            ).rowcount
+
+        if not updated:
+            conn.execute(
+                """
+                INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id, expires_at)
+                VALUES (?, ?, 'PAID', ?, ?, ?)
+                """,
+                (mac, int(amount), router_id, payment_order_id or "", paid_expires_at),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _process_one_pending_activation() -> bool:
+    row = _claim_next_pending_activation()
+    if not row:
+        return False
+
+    row_id = int(row["id"])
+    router_id = row["router_id"]
+    mac = row["mac_address"]
+    amount = int(row["amount"] or 0)
+    minutes = int(row["minutes"] or 60)
+    payment_order_id = row["payment_order_id"] or ""
+
+    try:
+        ok = set_mikrotik_ah_access(mac, router_id, minutes, mode="PAID")
+        if ok:
+            _mark_order_paid_from_activation(router_id, mac, amount, minutes, payment_order_id)
+            _finalize_pending_activation(row_id, ok=True)
+            logger.info("[PENDING_ACTIVATION] done id=%s mac=%s router=%s", row_id, mac[:8] + "***", router_id)
+        else:
+            _finalize_pending_activation(row_id, ok=False, error_text="Router activation returned false")
+            logger.error("[PENDING_ACTIVATION] failed id=%s mac=%s router=%s", row_id, mac[:8] + "***", router_id)
+    except Exception as e:
+        _finalize_pending_activation(row_id, ok=False, error_text=str(e))
+        logger.error("[PENDING_ACTIVATION] exception id=%s err=%s", row_id, str(e)[:200])
+
+    return True
+
+
+async def _drain_pending_activations(limit: int = 1) -> int:
+    processed = 0
+    for _ in range(max(1, int(limit))):
+        ok = await asyncio.to_thread(_process_one_pending_activation)
+        if not ok:
+            break
+        processed += 1
+    return processed
+
+
+async def _pending_activation_loop():
+    logger.info("[PENDING_ACTIVATION] loop started, interval=%ss", PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS)
+    while not pending_activation_stop.is_set():
+        try:
+            await _drain_pending_activations(limit=8)
+        except Exception as e:
+            logger.error("[PENDING_ACTIVATION] loop exception: %s", str(e)[:200])
+
+        try:
+            await asyncio.wait_for(pending_activation_stop.wait(), timeout=PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+    logger.info("[PENDING_ACTIVATION] loop stopped")
+
+
+def _get_busy_activation_macs(router_id: str) -> set[str]:
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """
+            SELECT mac_address
+            FROM pending_activations
+            WHERE router_id = ?
+              AND status IN ('PENDING', 'PROCESSING', 'RETRY')
+              AND created_at > datetime('now', '-30 minutes')
+            """,
+            (router_id,),
+        ).fetchall()
+        return {_normalize_mac(r[0]) for r in rows if r and r[0]}
+    finally:
+        conn.close()
 
 init_db()
 
@@ -699,25 +1124,36 @@ async def _kaspi_sync_loop():
 
 @app.on_event("startup")
 async def _startup_kaspi_sync():
-    global kaspi_sync_task
+    global kaspi_sync_task, pending_activation_task
     kaspi_sync_stop.clear()
+    pending_activation_stop.clear()
     if KASPI_ENABLED:
         kaspi_sync_task = asyncio.create_task(_kaspi_sync_loop())
         logger.info("[KASPI] feature enabled")
     else:
         logger.info("[KASPI] feature disabled")
 
+    pending_activation_task = asyncio.create_task(_pending_activation_loop())
+    logger.info("[PENDING_ACTIVATION] feature enabled")
+
 
 @app.on_event("shutdown")
 async def _shutdown_kaspi_sync():
-    global kaspi_sync_task
+    global kaspi_sync_task, pending_activation_task
     kaspi_sync_stop.set()
+    pending_activation_stop.set()
     if kaspi_sync_task:
         try:
             await asyncio.wait_for(kaspi_sync_task, timeout=5)
         except Exception:
             pass
         kaspi_sync_task = None
+    if pending_activation_task:
+        try:
+            await asyncio.wait_for(pending_activation_task, timeout=5)
+        except Exception:
+            pass
+        pending_activation_task = None
 
 
 # --- ДИАГНОСТИКА РОУТЕРОВ ---
@@ -1144,12 +1580,13 @@ async def session_status(mac: str, router_id: str = "astana_01"):
     try:
         row = conn.execute(
             """SELECT status, expires_at FROM orders
-               WHERE mac_address=? AND router_id=? AND status IN ('PAY_WINDOW','TRIAL','PAID')
+                             WHERE mac_address=? AND router_id=? AND status IN ('PAY_WINDOW','TRIAL','PAYMENT_CONFIRMED','PAID')
                ORDER BY
                  CASE status
                    WHEN 'PAID' THEN 0
-                   WHEN 'TRIAL' THEN 1
-                   WHEN 'PAY_WINDOW' THEN 2
+                                     WHEN 'PAYMENT_CONFIRMED' THEN 1
+                                     WHEN 'TRIAL' THEN 2
+                                     WHEN 'PAY_WINDOW' THEN 3
                    ELSE 3
                  END,
                  created_at DESC
@@ -1161,6 +1598,8 @@ async def session_status(mac: str, router_id: str = "astana_01"):
     if not row:
         return utf8_json_response({"active": False, "expires_in": -1, "status": "NONE"})
     status, expires_at_str = row
+    if status == "PAYMENT_CONFIRMED":
+        return utf8_json_response({"active": False, "expires_in": -1, "status": status, "pending_activation": True})
     if not expires_at_str:
         return utf8_json_response({"active": True, "expires_in": -1, "status": status})
     try:
@@ -1534,6 +1973,119 @@ async def landing(request: Request):
     return templates.TemplateResponse("landing.html", {"request": request})
 
 
+@app.get("/api/qr/sign")
+async def sign_qr_router_link(router_id: str):
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    ts = str(int(time.time()))
+    sig = make_router_qr_signature(router_id, ts)
+    return utf8_json_response(
+        {
+            "ok": True,
+            "router_id": router_id,
+            "ts": ts,
+            "sig": sig,
+            "url": f"https://wifi-pay.kz/q?r={router_id}&ts={ts}&sig={sig}",
+        }
+    )
+
+
+@app.get("/q", response_class=HTMLResponse)
+async def qr_entry(
+    request: Request,
+    router_id: str = "",
+    r: str = "",
+    ts: str = "",
+    sig: str = "",
+    cid: str = "",
+):
+    cid = (cid or make_cid())[:24]
+    router_id = (r or router_id or "").strip()
+    if not router_id:
+        return utf8_json_response({"error": "router_id required"}, status_code=400)
+
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    signed_mode = bool(sig or ts)
+    if signed_mode and not is_valid_router_qr_signature(router_id, ts, sig):
+        return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
+
+    poll_error = ""
+    polled_clients = 0
+    try:
+        macs = await asyncio.wait_for(asyncio.to_thread(_collect_router_client_macs, router_id), timeout=5)
+        polled_clients = _upsert_router_clients_seen(router_id, macs, source="qr_entry")
+    except asyncio.TimeoutError:
+        poll_error = "Роутер отвечает слишком долго. Повторите обновление через пару секунд."
+    except Exception as e:
+        poll_error = f"Не удалось получить список клиентов: {str(e)[:120]}"
+
+    narrow_candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_NARROW_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+    candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+    busy_macs = _get_busy_activation_macs(router_id)
+    for c in candidates:
+        c["busy"] = (c["mac"] in busy_macs)
+
+    narrow_free = [c for c in narrow_candidates if c["mac"] not in busy_macs]
+
+    # Удобный auto-flow: если найден только 1 клиент в окне, сразу ведем к тарифам.
+    if len(narrow_free) == 1:
+        mac = narrow_free[0]["mac"]
+        tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
+        return RedirectResponse(url=tariff_url, status_code=303)
+
+    return templates.TemplateResponse(
+        "qr_entry.html",
+        {
+            "request": request,
+            "router_id": router_id,
+            "cid": cid,
+            "signed_mode": "true" if signed_mode else "false",
+            "poll_error": poll_error,
+            "polled_clients": polled_clients,
+            "candidates": candidates,
+            "narrow_window_seconds": QR_NARROW_LOOKBACK_SECONDS,
+            "full_window_seconds": QR_LOOKBACK_SECONDS,
+            "ts": ts,
+            "sig": sig,
+        },
+    )
+
+
+@app.get("/q/select")
+async def qr_select_mac(mac: str, router_id: str, cid: str = ""):
+    cid = (cid or make_cid())[:24]
+    mac_norm = _normalize_mac(mac)
+    if not _is_valid_mac(mac_norm):
+        return utf8_json_response({"error": "Некорректный MAC"}, status_code=400)
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    if _normalize_mac(mac_norm) in _get_busy_activation_macs(router_id):
+        return utf8_json_response({"error": "Для этого устройства уже выполняется активация. Подождите 10-20 секунд."}, status_code=409)
+
+    tariff_url = f"/tariffs?{urlencode({'mac': mac_norm, 'router_id': router_id, 'cid': cid})}"
+    return RedirectResponse(url=tariff_url, status_code=303)
+
+
+@app.get("/api/router/recent_clients")
+async def router_recent_clients(router_id: str, lookback_seconds: int = QR_LOOKBACK_SECONDS):
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+    lookback_seconds = max(15, min(1800, int(lookback_seconds)))
+    clients = _get_recent_router_clients(router_id, lookback_seconds=lookback_seconds, limit=QR_MAX_CANDIDATES)
+    return utf8_json_response({"ok": True, "router_id": router_id, "lookback_seconds": lookback_seconds, "clients": clients})
+
+
+@app.post("/api/activation/process_pending")
+async def process_pending_activations(limit: int = 10):
+    limit = max(1, min(100, int(limit)))
+    processed = await _drain_pending_activations(limit=limit)
+    return utf8_json_response({"ok": True, "processed": processed})
+
+
 @app.get("/choose_payment", response_class=HTMLResponse)
 async def choose_payment(
     request: Request,
@@ -1824,34 +2376,50 @@ async def payment_result(request: Request):
         router_id = router_id or 'astana_01'
         _, amount_to_minutes, _, _ = get_tariff_runtime_state()
         minutes = amount_to_minutes.get(amount, 60)
-        paid_expires_at = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat()
+        logger.info(f"[payment_result] queue activation on {minutes} мин для {mac[:8]}*** ({router_id})")
 
-        logger.info(f"[payment_result] Активирую PAID на {minutes} минут для {mac[:8]}*** на {router_id}")
-        if not mac or not await asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, minutes, mode="PAID"):
-            logger.error(f"[payment_result] ❌ ОШИБКА: Не удалось активировать PAID для {mac[:8]}*** на {router_id}")
-            return Response(content="Activation failed", status_code=500)
+        if not mac:
+            logger.error("[payment_result] ❌ ОШИБКА: MAC не найден")
+            return Response(content="MAC not found", status_code=500)
+
+        try:
+            pending_id = await asyncio.to_thread(
+                _enqueue_pending_activation,
+                router_id,
+                mac,
+                amount,
+                minutes,
+                payment_order_id,
+            )
+            logger.info("[payment_result] pending activation id=%s queued", pending_id)
+        except Exception as e:
+            logger.error("[payment_result] ❌ ОШИБКА постановки в очередь активации: %s", str(e)[:200])
+            return Response(content="Activation queue failed", status_code=500)
+
+        # Делаем быстрый проход очереди сразу, чтобы в большинстве случаев доступ открылся мгновенно.
+        await _drain_pending_activations(limit=2)
 
         conn = get_db()
         try:
             updated = 0
             if payment_order_id:
                 updated = conn.execute(
-                    "UPDATE orders SET status = 'PAID', amount = ?, mac_address = ?, router_id = ?, expires_at = ? WHERE payment_order_id = ?",
-                    (amount, mac, router_id, paid_expires_at, payment_order_id),
+                    "UPDATE orders SET status = 'PAYMENT_CONFIRMED', amount = ?, mac_address = ?, router_id = ? WHERE payment_order_id = ?",
+                    (amount, mac, router_id, payment_order_id),
                 ).rowcount
             elif mac:
                 updated = conn.execute(
-                    "UPDATE orders SET status = 'PAID', amount = ?, router_id = ?, expires_at = ? WHERE id = (SELECT id FROM orders WHERE mac_address = ? AND status IN ('PAYMENT_INITIATED', 'PAY_WINDOW') ORDER BY id DESC LIMIT 1)",
-                    (amount, router_id, paid_expires_at, mac),
+                    "UPDATE orders SET status = 'PAYMENT_CONFIRMED', amount = ?, router_id = ? WHERE id = (SELECT id FROM orders WHERE mac_address = ? AND status IN ('PAYMENT_INITIATED', 'PAY_WINDOW', 'PAYMENT_CONFIRMED') ORDER BY id DESC LIMIT 1)",
+                    (amount, router_id, mac),
                 ).rowcount
 
             if not updated:
                 conn.execute(
-                    "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id, expires_at) VALUES (?, ?, 'PAID', ?, ?, ?)",
-                    (mac, amount, router_id, payment_order_id, paid_expires_at),
+                    "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id) VALUES (?, ?, 'PAYMENT_CONFIRMED', ?, ?)",
+                    (mac, amount, router_id, payment_order_id),
                 )
             conn.commit()
-            logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ обработано для {mac[:8]}*** на {minutes} минут")
+            logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ подтверждено для {mac[:8]}***, активация через очередь")
             logger.info(f"[payment_result] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
         finally:
             conn.close()

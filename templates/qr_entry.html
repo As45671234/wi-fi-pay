@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi-Pay | Выбор устройства</title>
+    <!-- Yandex.Metrika counter -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=108568669', 'ym');
+        ym(108568669, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/108568669" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(170deg, #eef6ff 0%, #f7fbff 50%, #f2f8ff 100%);
+            color: #0f172a;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            width: min(700px, 100%);
+            background: #ffffff;
+            border: 1px solid #dbeafe;
+            border-radius: 24px;
+            box-shadow: 0 16px 42px rgba(29, 78, 216, 0.12);
+            padding: 26px;
+        }
+        .badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 5px 12px;
+            background: #e0edff;
+            color: #1d4ed8;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 28px;
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+        }
+        .sub {
+            margin: 0 0 16px;
+            color: #64748b;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+        .status {
+            margin: 0 0 16px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            border: 1px solid #dbeafe;
+            background: #f8fbff;
+        }
+        .status.error {
+            border-color: #fecaca;
+            background: #fff1f2;
+            color: #b91c1c;
+        }
+        .list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 10px;
+        }
+        .item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 12px;
+            background: #ffffff;
+        }
+        .mac {
+            font-weight: 700;
+            font-size: 16px;
+            color: #0f172a;
+            margin: 0;
+        }
+        .meta {
+            margin: 2px 0 0;
+            font-size: 12px;
+            color: #64748b;
+        }
+        .btn {
+            border: 0;
+            border-radius: 999px;
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform .15s ease;
+            white-space: nowrap;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary {
+            background: #2563eb;
+            color: #fff;
+        }
+        .btn-light {
+            background: #eff6ff;
+            color: #1e40af;
+        }
+        .toolbar {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .muted {
+            margin-top: 12px;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        @media (max-width: 600px) {
+            .card { padding: 18px; border-radius: 18px; }
+            h1 { font-size: 22px; }
+            .item {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <span class="badge">WiFi-Pay Router {{ router_id }}</span>
+        <h1>Подтвердите ваше устройство</h1>
+        <p class="sub">Мы нашли устройства, недавно подключенные к WiFi в этом автобусе. Выберите свое устройство, чтобы перейти к тарифам.</p>
+
+        {% if poll_error %}
+        <div class="status error">{{ poll_error }}</div>
+        {% else %}
+        <div class="status">Обновлено с роутера: {{ polled_clients }} MAC. Узкое окно авто-выбора: {{ narrow_window_seconds }} сек. Полное окно списка: {{ full_window_seconds }} сек.</div>
+        {% endif %}
+
+        {% if candidates and candidates|length > 0 %}
+        <ul class="list">
+            {% for c in candidates %}
+            <li class="item">
+                <div>
+                    <p class="mac">{{ c.masked_mac }}</p>
+                    <p class="meta">Последняя активность: {{ c.last_seen }} | Наблюдений: {{ c.seen_count }}{% if c.busy %} | Активация уже выполняется{% endif %}</p>
+                </div>
+                {% if c.busy %}
+                <button class="btn btn-light" type="button" disabled>Устройство уже обрабатывается</button>
+                {% else %}
+                <a class="btn btn-primary" href="/q/select?mac={{ c.mac }}&router_id={{ router_id }}&cid={{ cid }}">Это мое устройство</a>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="status">
+            Устройства пока не найдены. Подключитесь к WiFi-сети автобуса, подождите 5-10 секунд и нажмите обновить.
+        </div>
+        {% endif %}
+
+        <div class="toolbar">
+            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Обновить список</a>
+            <a class="btn btn-light" href="/landing">На лендинг</a>
+        </div>
+
+        <p class="muted">CID: {{ cid }} | Router: {{ router_id }}</p>
+    </main>
+</body>
+</html>
