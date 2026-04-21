@@ -448,83 +448,76 @@ def is_valid_router_qr_signature(router_id: str, ts: str, sig: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# QR-флоу: определение MAC по IP-адресу HTTP-запроса
+# QR-флоу: определение MAC через подписанную cookie
 # ---------------------------------------------------------------------------
-# Принцип: когда пользователь открывает /q, его HTTP-запрос идёт с IP-адреса,
-# который MikroTik назначил именно его устройству. В /ip/hotspot/host и
-# /ip/hotspot/active хранится пара address (IP) + mac-address.
-# Просто сопоставляем IP запроса с таблицей роутера — мгновенно, точно,
-# работает независимо от времени подключения и числа устройств в сети.
+# Принцип:
+#   1. MikroTik при первом подключении делает captive-portal redirect на
+#      http://wifi-pay.kz/?mac=XX:XX:XX:XX:XX:XX&router_id=astana_XX
+#   2. Мы принимаем этот redirect в GET /, сохраняем MAC в подписанную
+#      cookie wf_dev (HMAC-SHA256, TTL 30 дней).
+#   3. Когда пользователь сканирует QR-код (/q), читаем cookie → получаем
+#      MAC мгновенно и точно.
+#
+# Почему IP-метод не работает:
+#   Сервер находится на VPS. MikroTik натирует трафик — все запросы с
+#   роутера приходят с одного публичного IP. Внутренние hotspot-адреса
+#   (10.x.x.x) видны только внутри сети роутера.
 # ---------------------------------------------------------------------------
 
-def _lookup_mac_by_ip(live_clients: list[dict], client_ip: str, busy_macs: set[str]) -> dict | None:
-    """Найти MAC пользователя по IP его HTTP-запроса.
+_DEVICE_COOKIE_NAME = "wf_dev"
+_DEVICE_COOKIE_TTL_DAYS = 30
 
-    Возвращает первый элемент из live_clients, у которого поле 'address'
-    совпадает с client_ip и MAC не занят активацией. Если IP неизвестен или
-    совпадений нет — возвращает None.
-    """
-    if not client_ip or client_ip in ('unknown', '127.0.0.1'):
+
+def _make_device_cookie(mac: str, router_id: str) -> str:
+    """Создать подписанную cookie: base64(mac|router_id).HMAC."""
+    payload = f"{mac}|{router_id}"
+    sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    import base64
+    encoded = base64.urlsafe_b64encode(payload.encode()).decode()
+    return f"{encoded}.{sig}"
+
+
+def _parse_device_cookie(cookie_value: str) -> tuple[str, str] | None:
+    """Распарсить и проверить cookie. Возвращает (mac, router_id) или None."""
+    if not cookie_value:
         return None
-    for c in live_clients:
-        if c.get('address') == client_ip and c.get('mac') not in busy_macs:
-            return c
-    return None
-
-
-def _collect_router_clients(router_id: str) -> list[dict]:
-    """Получить список клиентов хотспота с роутера: [{mac, address}].
-
-    Опрашивает /ip/hotspot/host и /ip/hotspot/active, объединяет данные.
-    - mac     — нормализованный MAC-адрес (XX:XX:XX:XX:XX:XX)
-    - address — IP-адрес, назначенный MikroTik этому устройству
-
-    Поле address используется как ключ для однозначного определения MAC
-    пользователя по IP его HTTP-запроса к серверу.
-    """
-    config = ROUTERS_CONFIG.get(router_id)
-    if not config:
-        return []
-
-    api_port = int(config.get("port", 8728))
-    if not _router_api_reachable(config["ip"], api_port):
-        raise RuntimeError(f"Router API unavailable: {router_id} ({config['ip']}:{api_port})")
-
-    connection = None
     try:
-        connection = routeros_api.RouterOsApiPool(
-            config["ip"],
-            username=config["user"],
-            password=config["pass"],
-            port=api_port,
-            plaintext_login=True,
-        )
-        api = connection.get_api()
+        import base64
+        parts = cookie_value.split(".")
+        if len(parts) != 2:
+            return None
+        encoded, sig = parts
+        payload = base64.urlsafe_b64decode(encoded.encode()).decode()
+        expected_sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        mac, router_id = payload.split("|", 1)
+        if not _is_valid_mac(_normalize_mac(mac)):
+            return None
+        if router_id not in ROUTERS_CONFIG:
+            return None
+        return _normalize_mac(mac), router_id
+    except Exception:
+        return None
 
-        # mac → IP-адрес клиента
-        macs: dict[str, str] = {}
 
-        for row in api.get_resource('/ip/hotspot/host').call('print'):
-            mac = _normalize_mac(row.get('mac-address', ''))
-            if _is_valid_mac(mac):
-                addr = (row.get('address') or '').strip()
-                if mac not in macs and addr:
-                    macs[mac] = addr
+def _set_device_cookie(response: Response, mac: str, router_id: str) -> None:
+    """Установить подписанную cookie с MAC и router_id."""
+    value = _make_device_cookie(mac, router_id)
+    response.set_cookie(
+        key=_DEVICE_COOKIE_NAME,
+        value=value,
+        max_age=_DEVICE_COOKIE_TTL_DAYS * 86400,
+        httponly=True,
+        samesite="lax",
+    )
 
-        for row in api.get_resource('/ip/hotspot/active').call('print'):
-            mac = _normalize_mac(row.get('mac-address', ''))
-            if _is_valid_mac(mac):
-                addr = (row.get('address') or '').strip()
-                if mac not in macs and addr:
-                    macs[mac] = addr
 
-        return [{'mac': mac, 'address': addr} for mac, addr in macs.items()]
-    finally:
-        if connection:
-            try:
-                connection.disconnect()
-            except Exception:
-                pass
+def _get_mac_from_cookie(request: Request) -> tuple[str, str] | None:
+    """Прочитать MAC и router_id из подписанной cookie. None если нет или невалидна."""
+    cookie = request.cookies.get(_DEVICE_COOKIE_NAME, "")
+    return _parse_device_cookie(cookie)
+
 
 
 def _enqueue_pending_activation(router_id: str, mac: str, amount: int, minutes: int, payment_order_id: str = "") -> int:
@@ -1640,6 +1633,11 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+    # Сохраняем MAC в подписанную cookie, чтобы /q мог определить устройство без опроса роутера
+    mac_norm = _normalize_mac(mac)
+    if _is_valid_mac(mac_norm) and router_id in ROUTERS_CONFIG:
+        _set_device_cookie(response, mac_norm, router_id)
+        logger.info("[welcome] cookie set mac=%s router=%s cid=%s", mac_norm[:8] + '***', router_id, cid)
     return response
 
 
@@ -1975,14 +1973,11 @@ async def qr_entry(
 
     Алгоритм:
       1. Валидация router_id и HMAC-подписи QR-токена.
-      2. Опрос роутера — получаем [{mac, address}] всех клиентов хотспота.
-      3. Ищем MAC по IP входящего HTTP-запроса (_lookup_mac_by_ip).
-         MikroTik назначает каждому клиенту IP, который совпадает с IP
-         HTTP-запроса пользователя. Метод мгновенный и точный при любом
-         числе устройств на роутере.
-      4. Если IP-поиск не дал результата (роутер недоступен, IP-адрес
-         не распознан и т.п.) — показываем qr_entry.html с инструкцией
-         переподключиться к WiFi.
+      2. Читаем подписанную cookie wf_dev, которая была сохранена
+         когда MikroTik captive-portal перенаправил пользователя на /?mac=XX.
+      3. Если cookie есть и router_id совпадает — редирект на welcome.
+      4. Если cookie нет — показываем страницу с инструкцией (открыть любой
+         сайт в браузере — это триггернет captive-portal redirect).
     """
     cid = (cid or make_cid())[:24]
     router_id = (r or router_id or "").strip()
@@ -1996,84 +1991,64 @@ async def qr_entry(
     if signed_mode and not is_valid_router_qr_signature(router_id, ts, sig):
         return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
 
-    client_ip = get_client_ip(request)
+    # Пытаемся прочитать MAC из cookie
+    cookie_data = _get_mac_from_cookie(request)
+    if cookie_data:
+        mac_from_cookie, router_from_cookie = cookie_data
+        # Принимаем MAC из cookie если роутер совпадает (пользователь в том же автобусе)
+        if router_from_cookie == router_id:
+            logger.info("[QR] cookie hit mac=%s router=%s cid=%s", mac_from_cookie[:8] + '***', router_id, cid)
+            return RedirectResponse(
+                url=f"/?{urlencode({'mac': mac_from_cookie, 'router_id': router_id, 'cid': cid})}",
+                status_code=303,
+            )
+        # Cookie есть, но другой роутер — пользователь пересел в другой автобус.
+        # Удаляем старую cookie и просим открыть браузер.
+        logger.info("[QR] cookie mismatch (cookie_router=%s qr_router=%s) cid=%s",
+                    router_from_cookie, router_id, cid)
 
-    # Опрос роутера
-    poll_error = ""
-    live_clients: list[dict] = []
-    try:
-        live_clients = await asyncio.wait_for(
-            asyncio.to_thread(_collect_router_clients, router_id),
-            timeout=5,
-        )
-        logger.info("[QR] router=%s ip=%s clients=%d cid=%s", router_id, client_ip, len(live_clients), cid)
-    except asyncio.TimeoutError:
-        poll_error = "Роутер отвечает слишком долго."
-        logger.warning("[QR] timeout router=%s cid=%s", router_id, cid)
-    except Exception as e:
-        poll_error = f"Ошибка подключения к роутеру: {str(e)[:120]}"
-        logger.warning("[QR] poll error router=%s cid=%s err=%s", router_id, cid, str(e)[:120])
+    # Cookie нет ␸ли не совпадает роутер — показываем страницу с инструкцией
+    has_cookie = cookie_data is not None
+    detection_state = "wrong_router" if has_cookie else "no_cookie"
+    logger.info("[QR] no mac state=%s router=%s cid=%s", detection_state, router_id, cid)
 
-    # Поиск MAC по IP
-    busy_macs = _get_busy_activation_macs(router_id)
-    matched = _lookup_mac_by_ip(live_clients, client_ip, busy_macs)
-
-    if matched:
-        logger.info("[QR] found mac=%s by ip=%s router=%s cid=%s", matched['mac'][:8] + '***', client_ip, router_id, cid)
-        return RedirectResponse(
-            url=f"/?{urlencode({'mac': matched['mac'], 'router_id': router_id, 'cid': cid})}",
-            status_code=303,
-        )
-
-    # Не нашли — показываем страницу с инструкцией
-    detection_state = "no_clients" if not live_clients else "ip_not_found"
-    logger.info("[QR] not found ip=%s router=%s clients=%d state=%s cid=%s",
-                client_ip, router_id, len(live_clients), detection_state, cid)
-
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "qr_entry.html",
         {
             "request": request,
             "router_id": router_id,
             "cid": cid,
             "signed_mode": "true" if signed_mode else "false",
-            "poll_error": poll_error,
             "detection_state": detection_state,
             "ts": ts,
             "sig": sig,
             "auto_retry_ms": QR_CLIENT_AUTO_RETRY_MS,
         },
     )
+    # Если роутер другой — сбрасываем устаревшую cookie
+    if has_cookie:
+        resp.delete_cookie(_DEVICE_COOKIE_NAME)
+    return resp
 
 
 @app.get("/q/auto")
 async def qr_auto_pick(request: Request, router_id: str, cid: str = "", ts: str = "", sig: str = ""):
-    """Повторный опрос роутера и попытка определить MAC по IP. Используется кнопкой «Попробовать снова»."""
+    """Повторная попытка — читает ту же cookie и перенаправляет на welcome или назад на /q."""
     cid = (cid or make_cid())[:24]
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
     if (sig or ts) and not is_valid_router_qr_signature(router_id, ts, sig):
         return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
 
-    client_ip = get_client_ip(request)
-    live_clients: list[dict] = []
-    try:
-        live_clients = await asyncio.wait_for(
-            asyncio.to_thread(_collect_router_clients, router_id),
-            timeout=5,
-        )
-    except Exception as e:
-        logger.warning("[QR/auto] poll error router=%s cid=%s err=%s", router_id, cid, str(e)[:120])
-
-    busy_macs = _get_busy_activation_macs(router_id)
-    matched = _lookup_mac_by_ip(live_clients, client_ip, busy_macs)
-
-    if matched:
-        logger.info("[QR/auto] found mac=%s by ip=%s router=%s cid=%s", matched['mac'][:8] + '***', client_ip, router_id, cid)
-        return RedirectResponse(
-            url=f"/?{urlencode({'mac': matched['mac'], 'router_id': router_id, 'cid': cid})}",
-            status_code=303,
-        )
+    cookie_data = _get_mac_from_cookie(request)
+    if cookie_data:
+        mac_from_cookie, router_from_cookie = cookie_data
+        if router_from_cookie == router_id:
+            logger.info("[QR/auto] cookie hit mac=%s router=%s cid=%s", mac_from_cookie[:8] + '***', router_id, cid)
+            return RedirectResponse(
+                url=f"/?{urlencode({'mac': mac_from_cookie, 'router_id': router_id, 'cid': cid})}",
+                status_code=303,
+            )
 
     return RedirectResponse(
         url=f"/q?{urlencode({'router_id': router_id, 'cid': cid, 'ts': ts, 'sig': sig})}",
@@ -2095,20 +2070,6 @@ async def qr_select_mac(mac: str, router_id: str, cid: str = ""):
 
     tariff_url = f"/tariffs?{urlencode({'mac': mac_norm, 'router_id': router_id, 'cid': cid})}"
     return RedirectResponse(url=tariff_url, status_code=303)
-
-
-@app.get("/api/router/clients")
-async def router_live_clients(router_id: str):
-    """Диагностика: живой список клиентов роутера с IP-адресами (не отображает полные MAC)."""
-    if router_id not in ROUTERS_CONFIG:
-        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
-    try:
-        clients = await asyncio.wait_for(asyncio.to_thread(_collect_router_clients, router_id), timeout=8)
-    except Exception as e:
-        return utf8_json_response({"error": str(e)[:200]}, status_code=502)
-    # Маскируем MAC в ответе по соображениям безопасности
-    masked = [{"mac": c['mac'][:8] + '...' + c['mac'][-5:], "address": c.get('address', '')} for c in clients]
-    return utf8_json_response({"ok": True, "router_id": router_id, "count": len(clients), "clients": masked})
 
 
 @app.post("/api/activation/process_pending")

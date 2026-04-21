@@ -161,28 +161,29 @@
     <main class="card">
         <span class="badge">WiFi-Pay Router {{ router_id }}</span>
         <h1>Подтвердите ваше устройство</h1>
-        <p class="sub">Мы автоматически пытаемся определить ваше устройство на этом роутере и открыть стартовую страницу.</p>
-        <div class="status">Идет автоматический поиск устройства. Обычно это занимает 1-3 секунды.</div>
+        <p class="sub">Для получения доступа нам нужно определить ваше устройство.</p>
 
-        {% if poll_error %}
-        <div class="status error">{{ poll_error }}</div>
-        {% endif %}
-
-        <a class="btn btn-accent" href="/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Попробовать снова</a>
-
-        {% if detection_state == 'no_clients' %}
+        {% if detection_state == 'no_cookie' %}
+        <div class="status">
+            <strong>Шаг 1:</strong> Подключитесь к WiFi автобуса.<br>
+            <strong>Шаг 2:</strong> Откройте любой сайт в браузере — вас автоматически перенаправят.<br>
+            <strong>Шаг 3:</strong> Снова отсканируйте QR-код или нажмите кнопку ниже.
+        </div>
+        {% elif detection_state == 'wrong_router' %}
+        <div class="status error">
+            Ваш браузер подключён к другому автобусу.<br>
+            Подключитесь к WiFi <strong>этого</strong> автобуса, откройте любую страницу в браузере и снова отсканируйте QR-код.
+        </div>
+        {% elif detection_state == 'no_clients' %}
         <div class="status error">
             Вы не подключены к WiFi этого автобуса.<br>
-            Подключитесь к WiFi и нажмите кнопку выше.
-        </div>
-        {% else %}
-        <div class="status">
-            Вы подключены к WiFi, но роутер не может сопоставить ваш IP-адрес.<br><br>
-            <strong>Что сделать:</strong> отключитесь от WiFi, подождите 5 секунд, подключитесь снова и нажмите кнопку выше.
+            Подключитесь к WiFi и нажмите кнопку ниже.
         </div>
         {% endif %}
+
+        <a class="btn btn-accent" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Проверить снова</a>
+
         <div class="toolbar">
-            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Проверить снова</a>
             <a class="btn btn-light" href="/landing">На лендинг</a>
         </div>
 
@@ -190,12 +191,8 @@
     </main>
 
     <script>
-        // Периодически повторяем безопасное автоопределение.
-        setTimeout(function() {
-            window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
-        }, 250);
-
-        setInterval(function() {
+        // Повторяем проверку — возможно cookie уже установлена
+        var retryInterval = setInterval(function() {
             window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
         }, {{ auto_retry_ms }});
     </script>
