@@ -191,6 +191,8 @@ QR_MAX_CANDIDATES = max(1, int(os.getenv("QR_MAX_CANDIDATES", "8") or "8"))
 QR_TOKEN_SECRET = os.getenv("QR_TOKEN_SECRET") or SECRET_KEY
 QR_NARROW_LOOKBACK_SECONDS = max(15, int(os.getenv("QR_NARROW_LOOKBACK_SECONDS", "45") or "45"))
 QR_FRESH_FIRST_SEEN_SECONDS = max(20, int(os.getenv("QR_FRESH_FIRST_SEEN_SECONDS", "90") or "90"))
+QR_FAST_RESCAN_TIMEOUT_SECONDS = max(1, int(os.getenv("QR_FAST_RESCAN_TIMEOUT_SECONDS", "2") or "2"))
+QR_CLIENT_AUTO_RETRY_MS = max(800, int(os.getenv("QR_CLIENT_AUTO_RETRY_MS", "1200") or "1200"))
 
 PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS = max(2, int(os.getenv("PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS", "5") or "5"))
 PENDING_ACTIVATION_RETRY_DELAY_SECONDS = max(5, int(os.getenv("PENDING_ACTIVATION_RETRY_DELAY_SECONDS", "20") or "20"))
@@ -2081,6 +2083,22 @@ async def qr_entry(
     candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     busy_macs = _get_busy_activation_macs(router_id)
     auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+
+    # Fast-path: если сразу не нашли, делаем короткий доп. перескан без ожидания пользователя.
+    # Это сокращает время определения в моменты, когда устройство только что присоединилось к WiFi.
+    if not auto_pick:
+        try:
+            fast_macs = await asyncio.wait_for(
+                asyncio.to_thread(_collect_router_client_macs, router_id),
+                timeout=QR_FAST_RESCAN_TIMEOUT_SECONDS,
+            )
+            _upsert_router_clients_seen(router_id, fast_macs, source="qr_fast_rescan")
+            candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
+            busy_macs = _get_busy_activation_macs(router_id)
+            auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+        except Exception:
+            pass
+
     if auto_pick:
         welcome_url = f"/?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}"
         return RedirectResponse(url=welcome_url, status_code=303)
@@ -2101,6 +2119,7 @@ async def qr_entry(
             "full_window_seconds": QR_LOOKBACK_SECONDS,
             "ts": ts,
             "sig": sig,
+            "auto_retry_ms": QR_CLIENT_AUTO_RETRY_MS,
         },
     )
 

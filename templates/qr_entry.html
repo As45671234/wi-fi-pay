@@ -162,6 +162,7 @@
         <span class="badge">WiFi-Pay Router {{ router_id }}</span>
         <h1>Подтвердите ваше устройство</h1>
         <p class="sub">Мы автоматически пытаемся определить ваше устройство на этом роутере и открыть стартовую страницу.</p>
+        <div class="status">Идет автоматический поиск устройства. Обычно это занимает 1-3 секунды.</div>
 
         {% if poll_error %}
         <div class="status error">{{ poll_error }}</div>
@@ -192,7 +193,11 @@
         // Периодически повторяем безопасное автоопределение.
         setTimeout(function() {
             window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
-        }, 5000);
+        }, 250);
+
+        setInterval(function() {
+            window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
+        }, {{ auto_retry_ms }});
     </script>
 </body>
 </html>
