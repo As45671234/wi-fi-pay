@@ -2040,6 +2040,7 @@ async def qr_entry(
     sig: str = "",
     cid: str = "",
     show_candidates: int = 0,
+    preselected_mac: str = "",
 ):
     cid = (cid or make_cid())[:24]
     router_id = (r or router_id or "").strip()
@@ -2068,13 +2069,6 @@ async def qr_entry(
     for c in candidates:
         c["busy"] = (c["mac"] in busy_macs)
 
-    # Умный auto-flow: пытаемся выбрать лучший кандидат без участия пользователя.
-    auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
-    if auto_pick:
-        mac = auto_pick["mac"]
-        tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
-        return RedirectResponse(url=tariff_url, status_code=303)
-
     detection_state = "no_clients" if len(candidates) == 0 else "ambiguous"
 
     return templates.TemplateResponse(
@@ -2088,6 +2082,7 @@ async def qr_entry(
             "polled_clients": polled_clients,
             "candidates": candidates,
             "show_candidates": bool(int(show_candidates or 0)),
+            "preselected_mac": _normalize_mac(preselected_mac),
             "detection_state": detection_state,
             "narrow_window_seconds": QR_NARROW_LOOKBACK_SECONDS,
             "full_window_seconds": QR_LOOKBACK_SECONDS,
@@ -2116,14 +2111,8 @@ async def qr_auto_pick(router_id: str, cid: str = "", ts: str = "", sig: str = "
     candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     busy_macs = _get_busy_activation_macs(router_id)
     auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
-    if auto_pick:
-        return RedirectResponse(
-            url=f"/tariffs?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}",
-            status_code=303,
-        )
-
     return RedirectResponse(
-        url=f"/q?{urlencode({'router_id': router_id, 'cid': cid, 'ts': ts, 'sig': sig})}",
+        url=f"/q?{urlencode({'router_id': router_id, 'cid': cid, 'ts': ts, 'sig': sig, 'show_candidates': 1, 'preselected_mac': (auto_pick['mac'] if auto_pick else '')})}",
         status_code=303,
     )
 

@@ -187,6 +187,11 @@
             <a class="btn btn-light" href="/landing">На лендинг</a>
         </div>
         {% elif candidates and candidates|length > 0 %}
+        {% if preselected_mac %}
+        <div class="status">
+            Мы нашли наиболее вероятное устройство. Подтвердите выбор кнопкой напротив отмеченного варианта.
+        </div>
+        {% endif %}
         <ul class="list">
             {% for c in candidates %}
             <li class="item">
@@ -197,7 +202,7 @@
                 {% if c.busy %}
                 <button class="btn btn-light" type="button" disabled>Устройство уже обрабатывается</button>
                 {% else %}
-                <a class="btn btn-primary" href="/q/select?mac={{ c.mac }}&router_id={{ router_id }}&cid={{ cid }}">Это мое устройство</a>
+                <a class="btn btn-primary" href="/q/select?mac={{ c.mac }}&router_id={{ router_id }}&cid={{ cid }}">{% if preselected_mac and c.mac == preselected_mac %}Похоже это мое устройство{% else %}Это мое устройство{% endif %}</a>
                 {% endif %}
             </li>
             {% endfor %}
