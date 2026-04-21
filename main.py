@@ -532,25 +532,15 @@ def _pick_best_qr_candidate(candidates: list[dict], busy_macs: set[str]) -> dict
     if not free:
         return None
 
-    # Лучший UX: если есть ровно один "свежий" клиент, считаем его пользователем.
+    # Безопасный режим: выбираем только "свежий" и однозначный кандидат.
     fresh = [
         c for c in free
         if _is_recent_sqlite_ts(c.get("first_seen"), QR_FRESH_FIRST_SEEN_SECONDS)
+        and _is_recent_sqlite_ts(c.get("last_seen"), QR_NARROW_LOOKBACK_SECONDS)
+        and int(c.get("seen_count") or 0) <= 8
     ]
     if len(fresh) == 1:
         return fresh[0]
-
-    # Второй приоритет: единственный клиент в узком окне активности.
-    narrow = [
-        c for c in free
-        if _is_recent_sqlite_ts(c.get("last_seen"), QR_NARROW_LOOKBACK_SECONDS)
-    ]
-    if len(narrow) == 1:
-        return narrow[0]
-
-    # Третий приоритет: если вообще остался один свободный кандидат.
-    if len(free) == 1:
-        return free[0]
 
     return None
 
@@ -2039,8 +2029,6 @@ async def qr_entry(
     ts: str = "",
     sig: str = "",
     cid: str = "",
-    show_candidates: int = 0,
-    preselected_mac: str = "",
 ):
     cid = (cid or make_cid())[:24]
     router_id = (r or router_id or "").strip()
@@ -2066,8 +2054,10 @@ async def qr_entry(
 
     candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     busy_macs = _get_busy_activation_macs(router_id)
-    for c in candidates:
-        c["busy"] = (c["mac"] in busy_macs)
+    auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+    if auto_pick:
+        welcome_url = f"/?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}"
+        return RedirectResponse(url=welcome_url, status_code=303)
 
     detection_state = "no_clients" if len(candidates) == 0 else "ambiguous"
 
@@ -2080,9 +2070,6 @@ async def qr_entry(
             "signed_mode": "true" if signed_mode else "false",
             "poll_error": poll_error,
             "polled_clients": polled_clients,
-            "candidates": candidates,
-            "show_candidates": bool(int(show_candidates or 0)),
-            "preselected_mac": _normalize_mac(preselected_mac),
             "detection_state": detection_state,
             "narrow_window_seconds": QR_NARROW_LOOKBACK_SECONDS,
             "full_window_seconds": QR_LOOKBACK_SECONDS,
@@ -2111,8 +2098,14 @@ async def qr_auto_pick(router_id: str, cid: str = "", ts: str = "", sig: str = "
     candidates = _get_recent_router_clients(router_id, lookback_seconds=QR_LOOKBACK_SECONDS, limit=QR_MAX_CANDIDATES)
     busy_macs = _get_busy_activation_macs(router_id)
     auto_pick = _pick_best_qr_candidate(candidates, busy_macs)
+    if auto_pick:
+        return RedirectResponse(
+            url=f"/?{urlencode({'mac': auto_pick['mac'], 'router_id': router_id, 'cid': cid})}",
+            status_code=303,
+        )
+
     return RedirectResponse(
-        url=f"/q?{urlencode({'router_id': router_id, 'cid': cid, 'ts': ts, 'sig': sig, 'show_candidates': 1, 'preselected_mac': (auto_pick['mac'] if auto_pick else '')})}",
+        url=f"/q?{urlencode({'router_id': router_id, 'cid': cid, 'ts': ts, 'sig': sig})}",
         status_code=303,
     )
 

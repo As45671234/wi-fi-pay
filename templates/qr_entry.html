@@ -161,7 +161,7 @@
     <main class="card">
         <span class="badge">WiFi-Pay Router {{ router_id }}</span>
         <h1>Подтвердите ваше устройство</h1>
-        <p class="sub">Мы нашли устройства, недавно подключенные к WiFi в этом автобусе. Выберите свое устройство, чтобы перейти к тарифам.</p>
+        <p class="sub">Мы автоматически пытаемся определить ваше устройство на этом роутере и открыть стартовую страницу.</p>
 
         {% if poll_error %}
         <div class="status error">{{ poll_error }}</div>
@@ -171,63 +171,33 @@
 
         <a class="btn btn-accent" href="/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Определить мое устройство автоматически</a>
 
-        {% if not show_candidates %}
         {% if detection_state == 'no_clients' %}
         <div class="status error">
             Мы не видим активных устройств на этом роутере. Скорее всего, вы не подключены к WiFi этого автобуса или открыли QR не от этого автобуса.
         </div>
         {% else %}
         <div class="status">
-            Устройства на этом роутере найдены, но сейчас нельзя однозначно определить ваше устройство автоматически. Нажмите "Определить автоматически" еще раз или выберите вручную.
+            Мы видим устройства на этом роутере, но не можем безопасно определить именно ваше. Подключитесь заново к WiFi в этом автобусе и нажмите кнопку выше.
         </div>
         {% endif %}
         <div class="toolbar">
             <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Проверить снова</a>
-            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}&show_candidates=1">Выбрать устройство вручную</a>
             <a class="btn btn-light" href="/landing">На лендинг</a>
         </div>
-        {% elif candidates and candidates|length > 0 %}
-        {% if preselected_mac %}
-        <div class="status">
-            Мы нашли наиболее вероятное устройство. Подтвердите выбор кнопкой напротив отмеченного варианта.
-        </div>
-        {% endif %}
-        <ul class="list">
-            {% for c in candidates %}
-            <li class="item">
-                <div>
-                    <p class="mac">{{ c.masked_mac }}</p>
-                    <p class="meta">Последняя активность: {{ c.last_seen }} | Первое появление: {{ c.first_seen }} | Наблюдений: {{ c.seen_count }}{% if c.busy %} | Активация уже выполняется{% endif %}</p>
-                </div>
-                {% if c.busy %}
-                <button class="btn btn-light" type="button" disabled>Устройство уже обрабатывается</button>
-                {% else %}
-                <a class="btn btn-primary" href="/q/select?mac={{ c.mac }}&router_id={{ router_id }}&cid={{ cid }}">{% if preselected_mac and c.mac == preselected_mac %}Похоже это мое устройство{% else %}Это мое устройство{% endif %}</a>
-                {% endif %}
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <div class="status">
-            Устройства пока не найдены. Подключитесь к WiFi-сети автобуса, подождите 5-10 секунд и нажмите обновить.
-        </div>
-        {% endif %}
 
         <div class="toolbar">
-            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}&show_candidates={{ 1 if show_candidates else 0 }}">Обновить список</a>
+            <a class="btn btn-light" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Обновить список</a>
             <a class="btn btn-light" href="/landing">На лендинг</a>
         </div>
 
         <p class="muted">CID: {{ cid }} | Router: {{ router_id }}</p>
     </main>
 
-    {% if not show_candidates %}
     <script>
-        // По умолчанию пытаемся автоопределить устройство без ручного выбора.
+        // Периодически повторяем безопасное автоопределение.
         setTimeout(function() {
             window.location.href = '/q/auto?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}';
         }, 5000);
     </script>
-    {% endif %}
 </body>
 </html>
