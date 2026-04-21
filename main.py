@@ -466,6 +466,8 @@ def is_valid_router_qr_signature(router_id: str, ts: str, sig: str) -> bool:
 
 _DEVICE_COOKIE_NAME = "wf_dev"
 _DEVICE_COOKIE_TTL_DAYS = 30
+QR_FALLBACK_MAX_IDLE_SECONDS = max(5, int(os.getenv("QR_FALLBACK_MAX_IDLE_SECONDS", "15")))
+QR_FALLBACK_POLL_TIMEOUT_SECONDS = max(2.0, float(os.getenv("QR_FALLBACK_POLL_TIMEOUT_SECONDS", "4")))
 
 
 def _make_device_cookie(mac: str, router_id: str) -> str:
@@ -517,6 +519,111 @@ def _get_mac_from_cookie(request: Request) -> tuple[str, str] | None:
     """Прочитать MAC и router_id из подписанной cookie. None если нет или невалидна."""
     cookie = request.cookies.get(_DEVICE_COOKIE_NAME, "")
     return _parse_device_cookie(cookie)
+
+
+def _routeros_duration_to_seconds(raw: str) -> int | None:
+    value = (raw or "").strip().lower()
+    if not value:
+        return None
+
+    if re.fullmatch(r"\d+", value):
+        return int(value)
+
+    # Формат RouterOS вида HH:MM:SS
+    if re.fullmatch(r"\d{1,2}:\d{2}:\d{2}", value):
+        hh, mm, ss = value.split(":")
+        return int(hh) * 3600 + int(mm) * 60 + int(ss)
+
+    # Формат RouterOS вида 2d03:14:55
+    m = re.fullmatch(r"(\d+)d(\d{1,2}):(\d{2}):(\d{2})", value)
+    if m:
+        days, hh, mm, ss = m.groups()
+        return int(days) * 86400 + int(hh) * 3600 + int(mm) * 60 + int(ss)
+
+    # Формат RouterOS вида 1w2d3h4m5s
+    total = 0
+    parsed_any = False
+    for amount, unit in re.findall(r"(\d+)([wdhms])", value):
+        parsed_any = True
+        n = int(amount)
+        if unit == "w":
+            total += n * 604800
+        elif unit == "d":
+            total += n * 86400
+        elif unit == "h":
+            total += n * 3600
+        elif unit == "m":
+            total += n * 60
+        elif unit == "s":
+            total += n
+    return total if parsed_any else None
+
+
+def _pick_qr_mac_fallback(router_id: str, busy_macs: set[str]) -> tuple[str | None, str]:
+    """Безопасный fallback: выбирает MAC только если есть ровно один свежий кандидат."""
+    config = ROUTERS_CONFIG.get(router_id)
+    if not config:
+        return None, "router_unknown"
+
+    connection = None
+    try:
+        connection = routeros_api.RouterOsApiPool(
+            config['ip'],
+            username=config['user'],
+            password=config['pass'],
+            port=int(config.get('port', 8728)),
+            plaintext_login=True,
+        )
+        api = connection.get_api()
+        host_res = api.get_resource('/ip/hotspot/host')
+        rows = host_res.call('print')
+    except Exception:
+        return None, "router_unavailable"
+    finally:
+        try:
+            if connection:
+                connection.disconnect()
+        except Exception:
+            pass
+
+    if not rows:
+        return None, "no_clients"
+
+    candidates = []
+    for row in rows:
+        mac = _normalize_mac(str(row.get('mac-address') or ""))
+        if not _is_valid_mac(mac):
+            continue
+        if mac in busy_macs:
+            continue
+
+        # Берем только "свежих" неавторизованных клиентов,
+        # чтобы не схватить случайное устройство из салона.
+        authorized_raw = str(row.get('authorized') or "").strip().lower()
+        if authorized_raw in ("true", "yes"):
+            continue
+
+        idle_seconds = _routeros_duration_to_seconds(str(row.get('idle-time') or row.get('idle_time') or ""))
+        if idle_seconds is None:
+            continue
+        if idle_seconds > QR_FALLBACK_MAX_IDLE_SECONDS:
+            continue
+
+        uptime_seconds = _routeros_duration_to_seconds(str(row.get('uptime') or "")) or 10**9
+        candidates.append({"mac": mac, "idle": idle_seconds, "uptime": uptime_seconds})
+
+    if not candidates:
+        return None, "no_fresh_candidates"
+
+    candidates.sort(key=lambda c: (c['idle'], c['uptime']))
+    if len(candidates) == 1:
+        return candidates[0]['mac'], "single_fresh"
+
+    # Если кандидатов несколько, разрешаем только явный лидер.
+    if (candidates[1]['idle'] - candidates[0]['idle']) >= 8:
+        return candidates[0]['mac'], "fresh_with_gap"
+
+    return None, "ambiguous"
 
 
 
@@ -1991,7 +2098,7 @@ async def qr_entry(
     if signed_mode and not is_valid_router_qr_signature(router_id, ts, sig):
         return utf8_json_response({"error": "Невалидная или просроченная QR-подпись"}, status_code=403)
 
-    # Пытаемся прочитать MAC из cookie
+    # 1) Пытаемся прочитать MAC из cookie
     cookie_data = _get_mac_from_cookie(request)
     if cookie_data:
         mac_from_cookie, router_from_cookie = cookie_data
@@ -2007,10 +2114,44 @@ async def qr_entry(
         logger.info("[QR] cookie mismatch (cookie_router=%s qr_router=%s) cid=%s",
                     router_from_cookie, router_id, cid)
 
-    # Cookie нет ␸ли не совпадает роутер — показываем страницу с инструкцией
+    # 2) Безопасный fallback по hotspot/host: только если кандидат один и свежий
+    busy_macs = _get_busy_activation_macs(router_id)
+    fallback_reason = "not_tried"
+    try:
+        fallback_mac, fallback_reason = await asyncio.wait_for(
+            asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
+            timeout=QR_FALLBACK_POLL_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        fallback_mac, fallback_reason = None, "router_timeout"
+    except Exception:
+        fallback_mac, fallback_reason = None, "router_error"
+
+    if fallback_mac:
+        logger.info(
+            "[QR] fallback hit mac=%s router=%s reason=%s cid=%s",
+            fallback_mac[:8] + '***',
+            router_id,
+            fallback_reason,
+            cid,
+        )
+        return RedirectResponse(
+            url=f"/?{urlencode({'mac': fallback_mac, 'router_id': router_id, 'cid': cid})}",
+            status_code=303,
+        )
+
+    # 3) Cookie нет или не совпадает, fallback тоже не сработал
     has_cookie = cookie_data is not None
-    detection_state = "wrong_router" if has_cookie else "no_cookie"
-    logger.info("[QR] no mac state=%s router=%s cid=%s", detection_state, router_id, cid)
+    if has_cookie:
+        detection_state = "wrong_router"
+    elif fallback_reason in ("no_clients",):
+        detection_state = "no_clients"
+    elif fallback_reason in ("ambiguous",):
+        detection_state = "ambiguous"
+    else:
+        detection_state = "no_cookie"
+
+    logger.info("[QR] no mac state=%s fallback=%s router=%s cid=%s", detection_state, fallback_reason, router_id, cid)
 
     resp = templates.TemplateResponse(
         "qr_entry.html",
@@ -2020,6 +2161,7 @@ async def qr_entry(
             "cid": cid,
             "signed_mode": "true" if signed_mode else "false",
             "detection_state": detection_state,
+            "fallback_reason": fallback_reason,
             "ts": ts,
             "sig": sig,
             "auto_retry_ms": QR_CLIENT_AUTO_RETRY_MS,
@@ -2049,6 +2191,31 @@ async def qr_auto_pick(request: Request, router_id: str, cid: str = "", ts: str 
                 url=f"/?{urlencode({'mac': mac_from_cookie, 'router_id': router_id, 'cid': cid})}",
                 status_code=303,
             )
+
+    # Повторная fallback-попытка по роутеру
+    busy_macs = _get_busy_activation_macs(router_id)
+    try:
+        fallback_mac, fallback_reason = await asyncio.wait_for(
+            asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
+            timeout=QR_FALLBACK_POLL_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        fallback_mac, fallback_reason = None, "router_timeout"
+    except Exception:
+        fallback_mac, fallback_reason = None, "router_error"
+
+    if fallback_mac:
+        logger.info(
+            "[QR/auto] fallback hit mac=%s router=%s reason=%s cid=%s",
+            fallback_mac[:8] + '***',
+            router_id,
+            fallback_reason,
+            cid,
+        )
+        return RedirectResponse(
+            url=f"/?{urlencode({'mac': fallback_mac, 'router_id': router_id, 'cid': cid})}",
+            status_code=303,
+        )
 
     return RedirectResponse(
         url=f"/q?{urlencode({'router_id': router_id, 'cid': cid, 'ts': ts, 'sig': sig})}",

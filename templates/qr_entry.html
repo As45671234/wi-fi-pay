@@ -174,6 +174,11 @@
             Ваш браузер подключён к другому автобусу.<br>
             Подключитесь к WiFi <strong>этого</strong> автобуса, откройте любую страницу в браузере и снова отсканируйте QR-код.
         </div>
+        {% elif detection_state == 'ambiguous' %}
+        <div class="status error">
+            Сейчас в сети несколько новых устройств, и мы не можем безопасно выбрать ваше автоматически.<br>
+            Откройте страницу входа кнопкой ниже, затем нажмите «Проверить снова».
+        </div>
         {% elif detection_state == 'no_clients' %}
         <div class="status error">
             Вы не подключены к WiFi этого автобуса.<br>
@@ -181,6 +186,7 @@
         </div>
         {% endif %}
 
+        <a class="btn btn-light" href="http://neverssl.com/" rel="noreferrer">Открыть страницу входа</a>
         <a class="btn btn-accent" href="/q?router_id={{ router_id }}&ts={{ ts }}&sig={{ sig }}&cid={{ cid }}">Проверить снова</a>
 
         <div class="toolbar">
