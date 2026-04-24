@@ -890,6 +890,112 @@ class KaspiStatusResponse(BaseModel):
     minutes: int
 
 
+KASPI_CHECKPAY_RESULT_OK = 0
+KASPI_CHECKPAY_RESULT_INVALID_REQUEST = 7
+KASPI_CHECKPAY_RESULT_CONTRACT_NOT_FOUND = 5
+KASPI_CHECKPAY_RESULT_AMOUNT_MISMATCH = 6
+KASPI_CHECKPAY_RESULT_ALREADY_PAID = 8
+KASPI_CHECKPAY_RESULT_TX_CONFLICT = 9
+KASPI_CHECKPAY_RESULT_INTERNAL_ERROR = 96
+
+
+def _pick_value(data: dict, *keys: str) -> str:
+    for key in keys:
+        if key in data and data.get(key) is not None:
+            value = str(data.get(key)).strip()
+            if value:
+                return value
+    return ""
+
+
+def _pick_amount_value(data: dict, *keys: str) -> int | None:
+    for key in keys:
+        if key not in data:
+            continue
+        raw = data.get(key)
+        if raw is None:
+            continue
+        try:
+            return int(float(str(raw).strip()))
+        except Exception:
+            continue
+    return None
+
+
+def _kaspi_request_id(data: dict) -> str:
+    return _pick_value(data, "request_id", "requestId", "id", "request")[:64] or "-"
+
+
+def _kaspi_response(request_id: str, result: int, message: str, extra: dict | None = None):
+    payload = {
+        "request_id": request_id,
+        "result": int(result),
+        "message": message,
+    }
+    if extra:
+        payload.update(extra)
+    return utf8_json_response(payload)
+
+
+def _normalize_contract_number(value: str) -> str:
+    return (value or "").strip().upper()
+
+
+def _fetch_kaspi_order_by_contract(contract_number: str) -> sqlite3.Row | None:
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            """
+            SELECT contract_number, kaspi_order_id, kaspi_status, is_activated,
+                   mac_address, router_id, amount, minutes, paid_at, activated_at
+            FROM kaspi_orders
+            WHERE contract_number = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (contract_number,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def _fetch_contract_by_transaction_id(transaction_id: str) -> str:
+    conn = get_db()
+    try:
+        row = conn.execute(
+            """
+            SELECT contract_number
+            FROM kaspi_orders
+            WHERE kaspi_order_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (transaction_id,),
+        ).fetchone()
+        return (row[0] if row and row[0] else "") or ""
+    finally:
+        conn.close()
+
+
+def _has_valid_checkpay_auth(request: Request) -> bool:
+    """Optional auth guard for Kaspi Check/Pay callbacks.
+
+    If KASPI_CHECKPAY_TOKEN is empty, auth is considered disabled.
+    """
+    token = (os.getenv("KASPI_CHECKPAY_TOKEN") or "").strip()
+    if not token:
+        return True
+
+    header_api_key = (request.headers.get("x-api-key") or "").strip()
+    auth_header = (request.headers.get("authorization") or "").strip()
+    bearer = ""
+    if auth_header.lower().startswith("bearer "):
+        bearer = auth_header[7:].strip()
+
+    return hmac.compare_digest(header_api_key, token) or hmac.compare_digest(bearer, token)
+
+
 def _normalize_mac(mac: str) -> str:
     return (mac or "").upper()
 
@@ -2425,6 +2531,258 @@ async def kaspi_order_status(contract_number: str):
             amount=int(row["amount"] or 0),
             minutes=int(row["minutes"] or 0),
         ).dict()
+    )
+
+
+@app.get("/docs/kaspi-check-pay")
+async def kaspi_check_pay_docs():
+    """Публичная ссылка со структурой Check/Pay для отправки в Kaspi."""
+    return utf8_json_response(
+        {
+            "service": "WiFi Pay",
+            "base_url": "https://wifi-pay.kz",
+            "protocol": "HTTPS",
+            "method": "POST",
+            "content_type": "application/json; charset=UTF-8",
+            "check": {
+                "url": "https://wifi-pay.kz/api/kaspi/check",
+                "request_example": {
+                    "request_id": "CHK-0001",
+                    "contract_number": "A13AABBCCDDEEFF1234567890ABCD",
+                    "amount": 1500,
+                },
+                "response_success_example": {
+                    "request_id": "CHK-0001",
+                    "result": 0,
+                    "message": "OK",
+                    "can_pay": True,
+                    "contract_number": "A13AABBCCDDEEFF1234567890ABCD",
+                    "amount": 1500,
+                    "currency": "KZT",
+                },
+                "response_error_example": {
+                    "request_id": "CHK-0002",
+                    "result": 5,
+                    "message": "Contract not found",
+                    "can_pay": False,
+                },
+            },
+            "pay": {
+                "url": "https://wifi-pay.kz/api/kaspi/pay",
+                "request_example": {
+                    "request_id": "PAY-0001",
+                    "transaction_id": "KASPI-TXN-987654321",
+                    "payment_datetime": "2026-04-24T15:30:00+05:00",
+                    "contract_number": "A13AABBCCDDEEFF1234567890ABCD",
+                    "amount": 1500,
+                },
+                "response_success_example": {
+                    "request_id": "PAY-0001",
+                    "result": 0,
+                    "message": "Payment accepted",
+                    "transaction_id": "KASPI-TXN-987654321",
+                    "status": "ACCEPTED",
+                },
+                "response_duplicate_example": {
+                    "request_id": "PAY-0001-R",
+                    "result": 0,
+                    "message": "Already processed",
+                    "transaction_id": "KASPI-TXN-987654321",
+                    "status": "DUPLICATE_OK",
+                },
+            },
+            "result_codes": {
+                "0": "OK",
+                "5": "Contract not found",
+                "6": "Amount mismatch",
+                "7": "Invalid request",
+                "8": "Already paid",
+                "9": "Transaction conflict",
+                "96": "Internal error",
+            },
+        }
+    )
+
+
+@app.post("/api/kaspi/check")
+async def kaspi_check(request: Request):
+    if not _has_valid_checkpay_auth(request):
+        return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid JSON")
+
+    if not isinstance(data, dict):
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Request body must be JSON object")
+
+    request_id = _kaspi_request_id(data)
+    contract_number = _normalize_contract_number(
+        _pick_value(data, "contract_number", "contractNumber", "account", "account_id", "order_id", "orderId")
+    )
+    amount = _pick_amount_value(data, "amount", "sum", "payment_amount", "paymentAmount")
+
+    if not contract_number:
+        return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "contract_number is required", {"can_pay": False})
+
+    row = _fetch_kaspi_order_by_contract(contract_number)
+    if not row:
+        return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_CONTRACT_NOT_FOUND, "Contract not found", {"can_pay": False})
+
+    expected_amount = int(row["amount"] or 0)
+    if amount is not None and amount != expected_amount:
+        return _kaspi_response(
+            request_id,
+            KASPI_CHECKPAY_RESULT_AMOUNT_MISMATCH,
+            "Amount mismatch",
+            {
+                "can_pay": False,
+                "contract_number": row["contract_number"],
+                "expected_amount": expected_amount,
+                "received_amount": amount,
+                "currency": "KZT",
+            },
+        )
+
+    kaspi_status = (row["kaspi_status"] or "").upper()
+    is_activated = bool(row["is_activated"])
+    if is_activated or kaspi_status in KASPI_PAID_STATUSES:
+        return _kaspi_response(
+            request_id,
+            KASPI_CHECKPAY_RESULT_ALREADY_PAID,
+            "Already paid",
+            {
+                "can_pay": False,
+                "contract_number": row["contract_number"],
+                "amount": expected_amount,
+                "currency": "KZT",
+                "status": kaspi_status or "PAID",
+                "is_activated": is_activated,
+            },
+        )
+
+    return _kaspi_response(
+        request_id,
+        KASPI_CHECKPAY_RESULT_OK,
+        "OK",
+        {
+            "can_pay": True,
+            "contract_number": row["contract_number"],
+            "amount": expected_amount,
+            "currency": "KZT",
+            "status": kaspi_status or "CREATED",
+            "router_id": row["router_id"],
+            "minutes": int(row["minutes"] or 0),
+        },
+    )
+
+
+@app.post("/api/kaspi/pay")
+async def kaspi_pay(request: Request):
+    if not _has_valid_checkpay_auth(request):
+        return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid JSON")
+
+    if not isinstance(data, dict):
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Request body must be JSON object")
+
+    request_id = _kaspi_request_id(data)
+    contract_number = _normalize_contract_number(
+        _pick_value(data, "contract_number", "contractNumber", "account", "account_id", "order_id", "orderId")
+    )
+    transaction_id = _pick_value(data, "transaction_id", "transactionId", "txn_id", "txnId", "payment_id", "paymentId")[:128]
+    amount = _pick_amount_value(data, "amount", "sum", "payment_amount", "paymentAmount")
+    payment_datetime = _pick_value(data, "payment_datetime", "paymentDateTime", "paid_at", "paidAt", "date")
+
+    if not contract_number:
+        return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "contract_number is required")
+    if amount is None or amount <= 0:
+        return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "amount is required")
+    if not transaction_id:
+        return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "transaction_id is required")
+
+    row = _fetch_kaspi_order_by_contract(contract_number)
+    if not row:
+        return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_CONTRACT_NOT_FOUND, "Contract not found")
+
+    expected_amount = int(row["amount"] or 0)
+    if amount != expected_amount:
+        return _kaspi_response(
+            request_id,
+            KASPI_CHECKPAY_RESULT_AMOUNT_MISMATCH,
+            "Amount mismatch",
+            {
+                "contract_number": contract_number,
+                "expected_amount": expected_amount,
+                "received_amount": amount,
+            },
+        )
+
+    tx_contract = _fetch_contract_by_transaction_id(transaction_id)
+    if tx_contract and tx_contract != contract_number:
+        return _kaspi_response(
+            request_id,
+            KASPI_CHECKPAY_RESULT_TX_CONFLICT,
+            "Transaction id already linked to another contract",
+            {"transaction_id": transaction_id, "contract_number": tx_contract},
+        )
+
+    status_before = (row["kaspi_status"] or "").upper()
+    is_activated_before = bool(row["is_activated"])
+    already_same_tx = bool((row["kaspi_order_id"] or "") == transaction_id and (is_activated_before or status_before in KASPI_PAID_STATUSES))
+    if already_same_tx:
+        return _kaspi_response(
+            request_id,
+            KASPI_CHECKPAY_RESULT_OK,
+            "Already processed",
+            {
+                "transaction_id": transaction_id,
+                "contract_number": contract_number,
+                "status": "DUPLICATE_OK",
+                "is_activated": is_activated_before,
+            },
+        )
+
+    try:
+        _upsert_kaspi_remote_state(
+            contract_number=contract_number,
+            kaspi_order_id=transaction_id,
+            kaspi_status="PAID",
+            paid_at=payment_datetime or datetime.utcnow().isoformat(),
+        )
+        _process_kaspi_paid(contract_number)
+    except Exception as e:
+        logger.error("[KASPI][PAY] processing failed contract=%s tx=%s err=%s", contract_number, transaction_id, str(e)[:200])
+        return _kaspi_response(
+            request_id,
+            KASPI_CHECKPAY_RESULT_INTERNAL_ERROR,
+            "Internal processing error",
+            {"transaction_id": transaction_id, "contract_number": contract_number},
+        )
+
+    row_after = _fetch_kaspi_order_by_contract(contract_number)
+    is_activated_after = bool(row_after["is_activated"]) if row_after else False
+    kaspi_status_after = ((row_after["kaspi_status"] or "PAID").upper() if row_after else "PAID")
+    response_status = "ACCEPTED" if is_activated_after else "ACCEPTED_PENDING_ACTIVATION"
+
+    return _kaspi_response(
+        request_id,
+        KASPI_CHECKPAY_RESULT_OK,
+        "Payment accepted",
+        {
+            "transaction_id": transaction_id,
+            "contract_number": contract_number,
+            "amount": expected_amount,
+            "currency": "KZT",
+            "status": response_status,
+            "kaspi_status": kaspi_status_after,
+            "is_activated": is_activated_after,
+        },
     )
 
 
