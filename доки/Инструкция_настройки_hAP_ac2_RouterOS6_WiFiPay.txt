@@ -1,0 +1,246 @@
+ИНСТРУКЦИЯ: НАСТРОЙКА MIKROTIK hAP ac^2 ДЛЯ WIFI-PAY
+Версия: 2026-04-26
+
+============================================================
+1) ДЛЯ КАКОЙ МОДЕЛИ ЭТА ИНСТРУКЦИЯ
+============================================================
+Подходит для:
+- MikroTik hAP ac^2
+- WinBox classic меню (как на вашем скриншоте)
+
+Основная разница от старых/других инструкций:
+- В WinBox используйте раздел Wireless (не WiFi/WiFiWave2)
+- В RouterOS 6.49.x нет WireGuard. Для WiFiPay нужен RouterOS 7.x
+- Базовые шаги: Bridge + Hotspot + Walled Garden + RouterOS7 + WireGuard + API доступ с VPS
+
+
+============================================================
+2) ПЕРЕД НАЧАЛОМ
+============================================================
+Проверьте, что есть:
+- router_id для нового роутера: astana_15, astana_16, ...
+- новый WG IP в сети 10.0.0.0/24 (например 10.0.0.16)
+- доступ в интернет на WAN
+- WinBox доступ к роутеру
+
+Важно:
+- Не закрывайте текущую WinBox-сессию, пока не проверили новый пароль и WireGuard.
+
+
+============================================================
+3) БАЗОВАЯ СЕТЬ (WAN/LAN)
+============================================================
+3.1 WAN
+- Интерфейс WAN обычно ether1
+- Получение интернета: DHCP Client на ether1 (или ваш способ)
+
+3.2 Bridge
+Bridge -> Bridge:
+- Должен быть bridge (обычно bridge)
+
+Bridge -> Ports:
+- LAN порты (обычно ether2-ether5) должны быть в bridge
+- WLAN интерфейсы также в bridge (после настройки Wi-Fi)
+
+3.3 LAN адрес
+IP -> Addresses:
+- 192.168.88.1/24 на интерфейсе bridge
+
+3.4 DHCP Server
+IP -> DHCP Server:
+- DHCP Server на bridge
+- Пул: 192.168.88.0/24
+
+IP -> DHCP Server -> Networks:
+- DNS Servers: 192.168.88.1
+- Gateway: 192.168.88.1
+
+
+============================================================
+4) WI-FI (Wireless)
+============================================================
+Wireless -> Interfaces:
+- Настройте wlan1 (2.4G) и при необходимости wlan2 (5G)
+- SSID: например Wifi-Pay-15
+
+Если сеть нужна открытая:
+- Security Profile: без WPA/WPA2 ключа
+
+После этого убедитесь, что wlan интерфейсы добавлены в bridge:
+- Bridge -> Ports -> add wlan1/wlan2
+
+
+============================================================
+5) HOTSPOT
+============================================================
+IP -> Hotspot -> Hotspot Setup:
+- Запускать на bridge
+
+Server Profiles -> hsprof1:
+General:
+- DNS Name: hotspot.wifi-pay.local
+- HTML Directory: hotspot
+
+Login:
+- Оставить HTTP CHAP
+- Cookie: disable
+- MAC Cookie: disable
+
+
+============================================================
+6) ВРЕМЯ И NTP
+============================================================
+System -> SNTP Client:
+- Enabled: yes
+- Primary NTP: 216.239.35.0
+- Secondary NTP: 216.239.35.4
+
+System -> Clock:
+- Time Zone Name: Asia/Almaty
+
+Проверьте, что NTP synchronized.
+
+Если в GUI отличается отображение, задайте через терминал:
+/system ntp client set enabled=yes primary-ntp=216.239.35.0 secondary-ntp=216.239.35.4
+/system clock set time-zone-name=Asia/Almaty
+
+
+============================================================
+7) WALLED GARDEN
+============================================================
+IP -> Hotspot -> Walled Garden:
+Добавить allow правила для:
+- wifi-pay.kz
+- www.wifi-pay.kz
+- api.freedompay.kz
+
+Не добавлять captive-check домены:
+- captive.apple.com
+- www.apple.com
+- connectivitycheck.gstatic.com
+- clients3.google.com
+- connect.rom.miui.com
+
+
+============================================================
+8) ROUTEROS7 И WIREGUARD
+============================================================
+Важно:
+- В RouterOS 6.49.x меню WireGuard отсутствует.
+- Для текущей архитектуры WiFiPay (VPS <-> router через WG 10.0.0.0/24)
+	нужно обновить роутер до RouterOS 7.x.
+
+8.0 Обновление до RouterOS 7 (через WinBox)
+System -> Packages -> Check For Updates:
+- Channel: stable
+- Download&Install
+- Дождаться reboot
+
+После загрузки проверить в терминале:
+/system package print
+(версия должна быть 7.x)
+
+8.1 На роутере
+WireGuard -> add interface wireguard1
+
+IP -> Addresses:
+- 10.0.0.X/24 на wireguard1
+
+WireGuard -> Peers -> add:
+- Public Key VPS: XNSGO48vf8JDFE6gPw+4HpG+DerPDBpwDUCMw+wlnCA=
+- Endpoint: 46.247.42.123
+- Endpoint Port: 443
+- Allowed Address: 10.0.0.0/24
+- Persistent Keepalive: 25
+
+8.2 На VPS
+В /etc/wireguard/wg0.conf добавить:
+
+[Peer]
+PublicKey = <public_key_роутера>
+AllowedIPs = 10.0.0.X/32
+
+Перезапуск:
+sudo systemctl restart wg-quick@wg0
+
+Проверка:
+ping -c 3 10.0.0.X
+
+
+============================================================
+9) ДОСТУП BACKEND К API РОУТЕРА
+============================================================
+Откройте New Terminal в WinBox и выполните:
+
+# Пользователь API (если нет отдельного)
+/user add name=admin password=REPLACE_STRONG_PASSWORD group=full
+
+# Включить API
+/ip service set api disabled=no port=8728 address=0.0.0.0/0
+
+# Разрешить API с VPS через WG
+/ip firewall filter add chain=input action=accept protocol=tcp src-address=10.0.0.1 dst-port=8728 in-interface=wireguard1 comment="allow_api_from_vps" place-before=0
+
+# Разрешить forward LAN<->WAN
+/ip firewall filter add chain=forward action=accept in-interface=bridge out-interface=ether1 comment="FORWARD_LAN_TO_WAN"
+/ip firewall filter add chain=forward action=accept in-interface=ether1 out-interface=bridge comment="FORWARD_WAN_TO_LAN"
+
+# Добавить WG в LAN list
+/interface list member add list=LAN interface=wireguard1
+
+# NAT в интернет
+/ip firewall nat add chain=srcnat action=masquerade out-interface=ether1 comment="NAT_TO_INTERNET"
+
+# MSS fix (по необходимости, если жалобы на открытие сайтов)
+/ip firewall mangle remove [find comment="MTU_FIX"]
+/ip firewall mangle add chain=forward action=change-mss new-mss=1300 passthrough=yes tcp-flags=syn protocol=tcp tcp-mss=1301-65535 comment="MTU_FIX" place-before=0
+
+
+============================================================
+10) СМЕНА ПАРОЛЯ ADMIN (РЕКОМЕНДУЕТСЯ)
+============================================================
+Вариант через GUI:
+- System -> Password (для текущего пользователя)
+
+Вариант через терминал:
+/user set [find where name="admin"] password="NEW_STRONG_PASSWORD"
+
+После смены обязательно обновить пароль в routers_config.json на VPS.
+
+
+============================================================
+11) ОБНОВЛЕНИЕ BACKEND НА VPS
+============================================================
+1. Добавить роутер в routers_config.json:
+- id: astana_0X
+- ip: 10.0.0.X
+- user/pass: как на роутере
+
+2. Перезапуск сервиса:
+cd ~/wi-fi-pay
+git pull
+sudo systemctl restart wifi-pay
+sudo systemctl status wifi-pay --no-pager
+
+3. Проверка API порта с VPS:
+nc -vz -w3 10.0.0.X 8728
+
+
+============================================================
+12) БЫСТРЫЙ ЧЕКЛИСТ
+============================================================
+[ ] RouterOS обновлен до 7.x
+[ ] SSID задан (Wifi-Pay-0X)
+[ ] wlan1/wlan2 добавлены в bridge
+[ ] Hotspot setup выполнен на bridge
+[ ] hsprof1: DNS Name=hotspot.wifi-pay.local
+[ ] Walled Garden только wifi-pay.kz/www/api.freedompay.kz
+[ ] NTP synchronized, timezone Asia/Almaty
+[ ] wireguard1 поднят, IP 10.0.0.X/24 назначен
+[ ] Peer на VPS добавлен (AllowedIPs 10.0.0.X/32)
+[ ] API 8728 доступен с 10.0.0.1
+[ ] NAT и forward правила есть
+[ ] routers_config.json обновлен на VPS
+[ ] Портал открывается, тарификация/оплата проходят
+
+Конец документа.
