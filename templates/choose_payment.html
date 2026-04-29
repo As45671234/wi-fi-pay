@@ -87,7 +87,7 @@
         }
 
         .option {
-            border: 2px solid #dbeafe;
+            border: 2px solid #e5e7eb;
             border-radius: 1rem;
             padding: 1rem;
             margin-bottom: 0.8rem;
@@ -108,6 +108,33 @@
             line-height: 1.45;
         }
 
+        /* Официальная кнопка Kaspi по гайду: красная, мин. 48px, без кастомного текста */
+        .btn-kaspi-official {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            min-height: 48px;
+            background-color: #EB2226;
+            color: #ffffff;
+            border: none;
+            border-radius: 0.9rem;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-sizing: border-box;
+            padding: 0 1rem;
+            margin: 8px 0; /* min 8dp свободное пространство */
+            box-shadow: 0 4px 14px rgba(235, 34, 38, 0.35);
+            text-decoration: none;
+        }
+        .btn-kaspi-official:disabled {
+            background-color: #94a3b8;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
         .btn {
             width: 100%;
             border: none;
@@ -120,18 +147,14 @@
             text-align: center;
             display: block;
             box-sizing: border-box;
+            min-height: 48px;
+            line-height: 1.2;
         }
 
         .btn-freedom {
             background-color: #1c75ff;
             color: #fff;
             box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25);
-        }
-
-        .btn-kaspi {
-            background: #e5e7eb;
-            color: #6b7280;
-            cursor: not-allowed;
         }
 
         .hint {
@@ -179,26 +202,31 @@
         </div>
     </div>
 
-    <div class="option">
-        <p class="option-title">Kaspi (эксперимент)</p>
-        <p class="option-desc">Создается локальный заказ и номер документа. После оплаты статус подтянется автоматически.</p>
-        {% if kaspi_enabled %}
-        <button class="btn btn-freedom" id="kaspiBtn" type="button">Оплатить через Kaspi</button>
-        {% else %}
-        <button class="btn btn-kaspi" type="button" disabled>Kaspi режим выключен</button>
-        {% endif %}
+    <!-- Kaspi — ПЕРВЫМ по гайду (выше остальных в вертикальном списке) -->
+    {% if kaspi_enabled %}
+    <div class="option" style="border-color: #fecaca;">
+        <p class="option-title">Оплата через Kaspi.kz</p>
+        <p class="option-desc">Оплатите в приложении Kaspi. Доступ откроется автоматически после оплаты.</p>
+        <button class="btn-kaspi-official" id="kaspiBtn" type="button">
+            <!-- Официальный логотип Kaspi (красный круг K) -->
+            <svg width="26" height="26" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="20" fill="#ffffff"/>
+                <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="900" fill="#EB2226" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">K</text>
+            </svg>
+            Оплатить с Kaspi.kz
+        </button>
     </div>
+    {% endif %}
 
+    <!-- Карта — ВТОРОЙ -->
     <div class="option">
         <p class="option-title">Оплата картой</p>
-        <p class="option-desc">Текущий рабочий вариант оплаты через FreedomPay.</p>
-        <a class="btn btn-freedom" href="/start_payment?amount={{ amount }}&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оплатить через карту</a>
+        <p class="option-desc">Оплата картой любого банка через FreedomPay.</p>
+        <a class="btn btn-freedom" href="/start_payment?amount={{ amount }}&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оплатить картой</a>
     </div>
 
-    <p class="hint">Данные заказа сохранены: сумма, MAC и router_id передаются на следующий шаг без изменений.</p>
-
     <div class="actions">
-        <a class="btn btn-back" href="/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Вернуться к тарифам</a>
+        <a class="btn" style="background:#fff;border:1px solid #d1d5db;color:#374151;" href="/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Вернуться к тарифам</a>
     </div>
 
     <div class="meta">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
@@ -216,7 +244,7 @@ const kaspiBtn = document.getElementById('kaspiBtn');
 if (kaspiBtn) {
     kaspiBtn.addEventListener('click', async function () {
         kaspiBtn.disabled = true;
-        kaspiBtn.textContent = 'Создаем заказ...';
+        kaspiBtn.textContent = 'Создаём заказ...';
 
         try {
             const resp = await fetch('/api/kaspi/create_order', {
@@ -225,14 +253,14 @@ if (kaspiBtn) {
                 body: JSON.stringify({ amount, mac, router_id: routerId, cid })
             });
             const data = await resp.json();
-            if (!resp.ok || !data.ok) {
-                throw new Error((data && data.error) ? data.error : 'Kaspi order create failed');
+            if (!resp.ok || !data.ok || !data.contract_number) {
+                throw new Error((data && data.error) ? data.error : 'Ошибка создания заказа');
             }
-            window.location.href = data.success_url;
+            window.location.href = `https://kaspi.kz/pay/Buslink?19626=${encodeURIComponent(data.contract_number)}`;
         } catch (err) {
             kaspiBtn.disabled = false;
-            kaspiBtn.textContent = 'Оплатить через Kaspi';
-            alert('Не удалось создать Kaspi заказ. Попробуйте еще раз.');
+            kaspiBtn.innerHTML = `<svg width="26" height="26" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="20" fill="#ffffff"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="900" fill="#EB2226" font-family="Arial,sans-serif">K</text></svg> Оплатить с Kaspi.kz`;
+            alert('Не удалось создать заказ. Попробуйте ещё раз.');
         }
     });
 }
