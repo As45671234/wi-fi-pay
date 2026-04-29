@@ -8,6 +8,10 @@ import routeros_api
 
 
 REQUIRED_WG_IP = "10.0.0.1"
+REQUIRED_LAN_SUBNET = "192.168.88.0/24"
+REQUIRED_LAN_GATEWAY = "192.168.88.1"
+REQUIRED_HOTSPOT_DNS_NAME = "hotspot.wifi-pay.local"
+DEFAULT_DNS_SERVERS = "8.8.8.8,1.1.1.1"
 REQUIRED_WALLED_GARDEN_HOSTS = [
     "wifi-pay.kz",
     "www.wifi-pay.kz",
@@ -118,6 +122,104 @@ def check_api_service(api, apply: bool) -> int:
     return changed
 
 
+def check_dns_settings(api, apply: bool) -> int:
+    dns = api.get_resource("/ip/dns")
+    rows = dns.call("print")
+    changed = 0
+
+    if not rows:
+        print("[WARN] '/ip/dns' returned no rows")
+        return changed
+
+    row = rows[0]
+    allow_remote = str(row.get("allow-remote-requests", row.get("allow_remote_requests", "no"))).lower()
+    servers = str(row.get("servers", "")).strip()
+
+    if allow_remote in ("true", "yes") and servers:
+        print(f"[OK] DNS remote requests enabled, servers={servers}")
+        return changed
+
+    print(f"[MISS] DNS settings allow-remote-requests={allow_remote} servers={servers or '-'}")
+    if apply:
+        dns.call(
+            "set",
+            arguments={
+                "allow-remote-requests": "yes",
+                "servers": servers or DEFAULT_DNS_SERVERS,
+            },
+        )
+        print(f"[FIX] DNS set allow-remote-requests=yes servers={servers or DEFAULT_DNS_SERVERS}")
+        changed += 1
+    return changed
+
+
+def check_hotspot_profile(api, apply: bool) -> int:
+    hotspot = api.get_resource("/ip/hotspot/profile")
+    rows = hotspot.call("print")
+    changed = 0
+
+    profile = first(rows, lambda r: r.get("name") == "hsprof1") or (rows[0] if rows else None)
+    if not profile:
+        print("[WARN] '/ip/hotspot/profile' returned no rows")
+        return changed
+
+    dns_name = str(profile.get("dns-name", profile.get("dns_name", ""))).strip()
+    html_dir = str(profile.get("html-directory", profile.get("html_directory", ""))).strip()
+
+    if dns_name == REQUIRED_HOTSPOT_DNS_NAME and html_dir == "hotspot":
+        print(f"[OK] Hotspot profile {profile.get('name')} dns-name={dns_name} html-directory={html_dir}")
+        return changed
+
+    print(
+        f"[MISS] Hotspot profile {profile.get('name')} dns-name={dns_name or '-'} html-directory={html_dir or '-'}"
+    )
+    if apply:
+        hotspot.call(
+            "set",
+            arguments={
+                ".id": profile.get("id") or profile.get(".id"),
+                "dns-name": REQUIRED_HOTSPOT_DNS_NAME,
+                "html-directory": "hotspot",
+            },
+        )
+        print(f"[FIX] Hotspot profile {profile.get('name')} set dns-name={REQUIRED_HOTSPOT_DNS_NAME} html-directory=hotspot")
+        changed += 1
+    return changed
+
+
+def check_dhcp_network(api, apply: bool) -> int:
+    dhcp_network = api.get_resource("/ip/dhcp-server/network")
+    rows = dhcp_network.call("print")
+    changed = 0
+
+    network = first(rows, lambda r: str(r.get("address", "")).strip() == REQUIRED_LAN_SUBNET)
+    if not network:
+        print(f"[WARN] DHCP network {REQUIRED_LAN_SUBNET} not found")
+        return changed
+
+    dns_server = str(network.get("dns-server", network.get("dns_server", ""))).strip()
+    gateway = str(network.get("gateway", "")).strip()
+    dns_ok = REQUIRED_LAN_GATEWAY in [x.strip() for x in dns_server.split(",") if x.strip()]
+
+    if gateway == REQUIRED_LAN_GATEWAY and dns_ok:
+        print(f"[OK] DHCP network {REQUIRED_LAN_SUBNET} gateway={gateway} dns-server={dns_server}")
+        return changed
+
+    print(f"[MISS] DHCP network {REQUIRED_LAN_SUBNET} gateway={gateway or '-'} dns-server={dns_server or '-'}")
+    if apply:
+        dhcp_network.call(
+            "set",
+            arguments={
+                ".id": network.get("id") or network.get(".id"),
+                "gateway": REQUIRED_LAN_GATEWAY,
+                "dns-server": REQUIRED_LAN_GATEWAY,
+            },
+        )
+        print(f"[FIX] DHCP network {REQUIRED_LAN_SUBNET} set gateway={REQUIRED_LAN_GATEWAY} dns-server={REQUIRED_LAN_GATEWAY}")
+        changed += 1
+    return changed
+
+
 def audit_and_fix(router_id: str, apply: bool) -> int:
     cfg = load_router_config(router_id)
     pool = None
@@ -129,6 +231,9 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
     try:
         pool, api = connect_api(cfg)
 
+        changes += check_dns_settings(api, apply)
+        changes += check_hotspot_profile(api, apply)
+        changes += check_dhcp_network(api, apply)
         changes += check_api_service(api, apply)
 
         fw_filter = api.get_resource("/ip/firewall/filter")
