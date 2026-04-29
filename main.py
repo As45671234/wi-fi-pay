@@ -946,18 +946,36 @@ def _normalize_contract_number(value: str) -> str:
 def _fetch_kaspi_order_by_contract(contract_number: str) -> sqlite3.Row | None:
     conn = get_db()
     conn.row_factory = sqlite3.Row
+    _SQL = """
+        SELECT contract_number, kaspi_order_id, kaspi_status, is_activated,
+               mac_address, router_id, amount, minutes, paid_at, activated_at
+        FROM kaspi_orders
+        WHERE contract_number = ?
+        ORDER BY id DESC
+        LIMIT 1
+    """
     try:
-        return conn.execute(
-            """
-            SELECT contract_number, kaspi_order_id, kaspi_status, is_activated,
-                   mac_address, router_id, amount, minutes, paid_at, activated_at
-            FROM kaspi_orders
-            WHERE contract_number = ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (contract_number,),
-        ).fetchone()
+        row = conn.execute(_SQL, (contract_number,)).fetchone()
+        if row:
+            return row
+        # Fallback: support old contract_number format (A13<MAC_HEX><timestamp>)
+        # Extract MAC from A13 prefix and look up by mac_address
+        m = re.match(r"A13([0-9A-F]{12})", contract_number)
+        if m:
+            mac_hex = m.group(1)
+            mac = ":".join(mac_hex[i:i+2] for i in range(0, 12, 2))
+            return conn.execute(
+                """
+                SELECT contract_number, kaspi_order_id, kaspi_status, is_activated,
+                       mac_address, router_id, amount, minutes, paid_at, activated_at
+                FROM kaspi_orders
+                WHERE mac_address = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (mac,),
+            ).fetchone()
+        return None
     finally:
         conn.close()
 
