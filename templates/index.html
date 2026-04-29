@@ -110,6 +110,10 @@
         
         .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
         .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
+        .btn-kaspi { background-color: #f8b200; color: #1a1a1a; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(248, 178, 0, 0.3); margin-top: 0.75rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+        .btn-kaspi:disabled { background-color: #94a3b8; color: #fff; cursor: not-allowed; }
+        .pay-divider { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0 0; color: #9ca3af; font-size: 0.78rem; }
+        .pay-divider::before, .pay-divider::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
         
@@ -139,6 +143,11 @@
 
         <div id="pay-btn-area">
             <button class="btn" id="main-pay-btn" onclick="payNow()" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</button>
+            <div class="pay-divider" id="kaspi-divider" style="display:none;">или</div>
+            <button class="btn-kaspi" id="kaspi-pay-btn" onclick="payKaspi()" style="display: none;">
+                <svg width="22" height="22" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="20" fill="#f8b200"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="bold" fill="#1a1a1a">K</text></svg>
+                Оплатить через Kaspi
+            </button>
         </div>
         
         <div class="mac-id">ID: <span id="mac-value">-</span> | ROUTER: <span id="router-value">-</span></div>
@@ -325,9 +334,13 @@
         
         const btnArea = document.getElementById('pay-btn-area');
         const payBtn = document.getElementById('main-pay-btn');
+        const kaspiBtn = document.getElementById('kaspi-pay-btn');
+        const kaspiDivider = document.getElementById('kaspi-divider');
         btnArea.style.display = 'block';
         payBtn.style.display = 'block';
-        payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸ И ПОЛУЧИТЬ ДОСТУП`;
+        kaspiBtn.style.display = 'flex';
+        kaspiDivider.style.display = 'flex';
+        payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸ КАРТОЙ`;
     }
 
     async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -381,13 +394,46 @@
         document.body.removeChild(link);
     }
 
+    async function payKaspi() {
+        if (selectedAmt <= 0) return;
+        const t0 = Date.now();
+        logClient('kaspi_pay_clicked', 0, 'amount=' + selectedAmt);
+        const btn = document.getElementById('kaspi-pay-btn');
+        btn.disabled = true;
+        btn.innerHTML = 'Создаём заказ...';
+        try {
+            const resp = await fetchWithTimeout('/api/kaspi/create_order', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mac: macAddress, router_id: routerId, amount: selectedAmt})
+            }, 10000);
+            const data = await resp.json();
+            if (!data.ok || !data.contract_number) {
+                throw new Error(data.error || 'create_order failed');
+            }
+            const kaspiUrl = `https://kaspi.kz/pay/Buslink?19626=${encodeURIComponent(data.contract_number)}`;
+            logClient('kaspi_redirect', Date.now() - t0, 'contract=' + data.contract_number);
+            window.location.href = kaspiUrl;
+        } catch (e) {
+            logClient('kaspi_error', Date.now() - t0, String(e));
+            btn.disabled = false;
+            btn.innerHTML = '<svg width="22" height="22" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="20" fill="#f8b200"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="bold" fill="#1a1a1a">K</text></svg> Оплатить через Kaspi';
+            alert('Не удалось создать заказ. Попробуйте ещё раз.');
+        }
+    }
+
     window.onpageshow = function(event) {
         const payBtn = document.getElementById('main-pay-btn');
         if (payBtn) {
             payBtn.disabled = false;
             payBtn.innerText = selectedAmt > 0
-                ? `ОПЛАТИТЬ ${selectedAmt} ₸ И ПОЛУЧИТЬ ДОСТУП`
-                : "ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП";
+                ? `ОПЛАТИТЬ ${selectedAmt} ₸ КАРТОЙ`
+                : "ОПЛАТИТЬ КАРТОЙ";
+        }
+        const kaspiBtn = document.getElementById('kaspi-pay-btn');
+        if (kaspiBtn) {
+            kaspiBtn.disabled = false;
+            kaspiBtn.innerHTML = '<svg width="22" height="22" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="20" fill="#f8b200"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="bold" fill="#1a1a1a">K</text></svg> Оплатить через Kaspi';
         }
     };
 </script>
