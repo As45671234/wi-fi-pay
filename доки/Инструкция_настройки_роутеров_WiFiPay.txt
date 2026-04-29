@@ -43,6 +43,14 @@ IP -> DHCP Server:
 - сеть 192.168.88.0/24
 - DNS Servers в Network: 192.168.88.1
 
+2.2.1 DNS (КРИТИЧНО для Android/OPPO captive portal)
+IP -> DNS:
+- Allow Remote Requests: yes
+- Servers: 8.8.8.8, 1.1.1.1 (или DNS вашего провайдера)
+
+Без этого `hotspot.wifi-pay.local` может не резолвиться,
+и на Android/OPPO будет ошибка `ERR_NAME_NOT_RESOLVED` вместо открытия captive portal.
+
 2.3 Wi-Fi
 - SSID: Wifi-Pay-0X (например Wifi-Pay-03)
 - открытая сеть (без пароля), если это ваш текущий сценарий
@@ -195,6 +203,12 @@ ROUTER_IPS=10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0
 - убрать captive-check домены из Walled Garden
 - открыть вручную http://neverssl.com
 
+Проблема: Android/OPPO пишет ERR_NAME_NOT_RESOLVED на hotspot.wifi-pay.local
+- проверить IP -> DNS -> Allow Remote Requests = yes
+- проверить что DHCP раздаёт DNS Server = 192.168.88.1
+- проверить что в hsprof1 задан DNS Name = hotspot.wifi-pay.local
+- если на телефоне включён Private DNS, временно отключить его для проверки
+
 Проблема: list_clients.sh падал на одном роутере
 - использовать актуальную версию скрипта (устойчива к недоступным роутерам)
 
@@ -204,6 +218,7 @@ ROUTER_IPS=10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0
 [ ] Wi-Fi SSID задан (Wifi-Pay-0X)
 [ ] Hotspot поднят на bridge
 [ ] hsprof1: DNS Name=hotspot.wifi-pay.local, HTTP CHAP only
+[ ] IP -> DNS: Allow Remote Requests=yes, DNS серверы заданы
 [ ] Walled Garden: только wifi-pay.kz, www.wifi-pay.kz, api.freedompay.kz
 [ ] NTP synchronized, timezone Asia/Almaty
 [ ] WireGuard IP 10.0.0.X/24 на wireguard1

@@ -1021,7 +1021,10 @@ def _normalize_mac(mac: str) -> str:
 
 
 def _is_valid_mac(mac: str) -> bool:
-    return bool(re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", _normalize_mac(mac)))
+    mac_norm = _normalize_mac(mac)
+    if not re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", mac_norm):
+        return False
+    return mac_norm != "00:00:00:00:00:00"
 
 
 def make_contract_number(mac: str) -> str:
@@ -1870,13 +1873,52 @@ async def prepare_access(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01", cid: str = ""):
     cid = (cid or make_cid())[:24]
-    logger.info(f"[welcome] cid={cid} mac={mac[:8]}*** router={router_id}")
+    mac_norm = _normalize_mac(mac)
+    logger.info(f"[welcome] cid={cid} mac={mac_norm[:8]}*** router={router_id}")
+
+    if not _is_valid_mac(mac_norm) and router_id in ROUTERS_CONFIG:
+        busy_macs = _get_busy_activation_macs(router_id)
+        fallback_reason = "not_tried"
+        try:
+            fallback_mac, fallback_reason = await asyncio.wait_for(
+                asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
+                timeout=QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            fallback_mac, fallback_reason = None, "router_timeout"
+        except Exception:
+            fallback_mac, fallback_reason = None, "router_error"
+
+        if fallback_mac:
+            logger.info(
+                "[welcome] fallback hit mac=%s router=%s reason=%s cid=%s",
+                fallback_mac[:8] + '***',
+                router_id,
+                fallback_reason,
+                cid,
+            )
+            return RedirectResponse(
+                url=f"/?{urlencode({'mac': fallback_mac, 'router_id': router_id, 'cid': cid})}",
+                status_code=303,
+            )
+
+        logger.info(
+            "[welcome] invalid mac -> qr fallback router=%s reason=%s cid=%s raw_mac=%s",
+            router_id,
+            fallback_reason,
+            cid,
+            mac_norm[:32],
+        )
+        return RedirectResponse(
+            url=f"/q?{urlencode({'router_id': router_id, 'cid': cid})}",
+            status_code=303,
+        )
+
     response = templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id, "cid": cid})
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     # Сохраняем MAC в подписанную cookie, чтобы /q мог определить устройство без опроса роутера
-    mac_norm = _normalize_mac(mac)
     if _is_valid_mac(mac_norm) and router_id in ROUTERS_CONFIG:
         _set_device_cookie(response, mac_norm, router_id)
         logger.info("[welcome] cookie set mac=%s router=%s cid=%s", mac_norm[:8] + '***', router_id, cid)
