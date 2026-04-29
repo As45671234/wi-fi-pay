@@ -1029,12 +1029,13 @@ def make_contract_number(mac: str) -> str:
     if not _is_valid_mac(mac_norm):
         raise ValueError("Некорректный MAC")
     mac_hex = mac_norm.replace(":", "").upper()
-    return f"A13{mac_hex}"
+    ts = int(time.time() * 1000)
+    return f"A13{mac_hex}{ts:X}"
 
 
 def parse_contract_number(contract_number: str) -> tuple[str, bool]:
     raw = (contract_number or "").strip().upper()
-    m = re.fullmatch(r"A13([0-9A-F]{12})", raw)
+    m = re.match(r"A13([0-9A-F]{12})", raw)
     if not m:
         return "", False
     mac_hex = m.group(1)
