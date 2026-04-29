@@ -2686,6 +2686,9 @@ async def kaspi_check(request: Request):
             phone=phone,
         )
 
+    _, _, amount_to_title, _ = get_tariff_runtime_state()
+    tariff_name = amount_to_title.get(expected_amount, f"Доступ в интернет {expected_amount} ₸")
+
     return _kaspi_response(
         request_id,
         KASPI_CHECKPAY_RESULT_OK,
@@ -2695,6 +2698,8 @@ async def kaspi_check(request: Request):
             "contract_number": row["contract_number"],
             "amount": expected_amount,
             "currency": "KZT",
+            "tariff_name": tariff_name,
+            "service_name": "BusLink — интернет в автобусе",
             "status": kaspi_status or "CREATED",
             "router_id": row["router_id"],
             "minutes": int(row["minutes"] or 0),
