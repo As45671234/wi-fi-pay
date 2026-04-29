@@ -350,6 +350,8 @@ def init_db():
         conn.execute("ALTER TABLE kaspi_orders ADD COLUMN activation_error TEXT")
     if 'last_activation_attempt_at' not in k_columns:
         conn.execute("ALTER TABLE kaspi_orders ADD COLUMN last_activation_attempt_at TIMESTAMP")
+    if 'phone' not in k_columns:
+        conn.execute("ALTER TABLE kaspi_orders ADD COLUMN phone TEXT")
 
     cursor.execute("PRAGMA table_info(pending_activations)")
     p_columns = {row[1] for row in cursor.fetchall()}
@@ -1008,15 +1010,13 @@ def make_contract_number(mac: str) -> str:
     mac_norm = _normalize_mac(mac)
     if not _is_valid_mac(mac_norm):
         raise ValueError("Некорректный MAC")
-    mac_hex = mac_norm.replace(":", "")
-    ts = int(time.time())
-    nonce = secrets.token_hex(2).upper()
-    return f"A13{mac_hex}{ts}{nonce}"
+    mac_hex = mac_norm.replace(":", "").upper()
+    return f"A13{mac_hex}"
 
 
 def parse_contract_number(contract_number: str) -> tuple[str, bool]:
     raw = (contract_number or "").strip().upper()
-    m = re.fullmatch(r"A13([0-9A-F]{12})(\d{10})([0-9A-F]{4})", raw)
+    m = re.fullmatch(r"A13([0-9A-F]{12})", raw)
     if not m:
         return "", False
     mac_hex = m.group(1)
@@ -1060,6 +1060,7 @@ def _upsert_kaspi_remote_state(
     kaspi_order_id: str,
     kaspi_status: str,
     paid_at: str | None,
+    phone: str | None = None,
 ) -> None:
     conn = get_db()
     try:
@@ -1072,10 +1073,11 @@ def _upsert_kaspi_remote_state(
                 END,
                 kaspi_status = ?,
                 paid_at = COALESCE(?, paid_at),
+                phone = COALESCE(?, phone),
                 updated_at = CURRENT_TIMESTAMP
             WHERE contract_number = ?
             """,
-            (kaspi_order_id, kaspi_order_id, kaspi_status, paid_at, contract_number),
+            (kaspi_order_id, kaspi_order_id, kaspi_status, paid_at, phone or None, contract_number),
         )
         conn.commit()
     finally:
@@ -2464,6 +2466,20 @@ async def create_kaspi_order(payload: KaspiCreateOrderRequest):
                 created_at,
                 updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(contract_number) DO UPDATE SET
+                local_order_id = excluded.local_order_id,
+                external_order_ref = excluded.external_order_ref,
+                router_id = excluded.router_id,
+                amount = excluded.amount,
+                minutes = excluded.minutes,
+                kaspi_status = 'CREATED',
+                is_activated = 0,
+                kaspi_order_id = NULL,
+                paid_at = NULL,
+                activation_lock = 0,
+                activation_attempts = 0,
+                last_activation_attempt_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
             """,
             (
                 local_order_id,
@@ -2477,8 +2493,6 @@ async def create_kaspi_order(payload: KaspiCreateOrderRequest):
             ),
         )
         conn.commit()
-    except sqlite3.IntegrityError:
-        return utf8_json_response({"error": "Конфликт заказа, повторите"}, status_code=409)
     finally:
         conn.close()
 
@@ -2622,6 +2636,7 @@ async def kaspi_check(request: Request):
         _pick_value(data, "contract_number", "contractNumber", "account", "account_id", "order_id", "orderId")
     )
     amount = _pick_amount_value(data, "amount", "sum", "payment_amount", "paymentAmount")
+    phone = _pick_value(data, "phone", "phone_number", "phoneNumber", "subscriber")[:32] or None
 
     if not contract_number:
         return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "contract_number is required", {"can_pay": False})
@@ -2662,6 +2677,15 @@ async def kaspi_check(request: Request):
             },
         )
 
+    if phone:
+        _upsert_kaspi_remote_state(
+            contract_number=contract_number,
+            kaspi_order_id=row["kaspi_order_id"] or "",
+            kaspi_status=kaspi_status or "CREATED",
+            paid_at=None,
+            phone=phone,
+        )
+
     return _kaspi_response(
         request_id,
         KASPI_CHECKPAY_RESULT_OK,
@@ -2698,6 +2722,7 @@ async def kaspi_pay(request: Request):
     transaction_id = _pick_value(data, "transaction_id", "transactionId", "txn_id", "txnId", "payment_id", "paymentId")[:128]
     amount = _pick_amount_value(data, "amount", "sum", "payment_amount", "paymentAmount")
     payment_datetime = _pick_value(data, "payment_datetime", "paymentDateTime", "paid_at", "paidAt", "date")
+    phone = _pick_value(data, "phone", "phone_number", "phoneNumber", "subscriber")[:32] or None
 
     if not contract_number:
         return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "contract_number is required")
@@ -2754,6 +2779,7 @@ async def kaspi_pay(request: Request):
             kaspi_order_id=transaction_id,
             kaspi_status="PAID",
             paid_at=payment_datetime or datetime.utcnow().isoformat(),
+            phone=phone,
         )
         _process_kaspi_paid(contract_number)
     except Exception as e:
