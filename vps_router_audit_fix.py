@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ipaddress
 import json
 import sys
 from typing import Dict, List
@@ -8,8 +9,6 @@ import routeros_api
 
 
 REQUIRED_WG_IP = "10.0.0.1"
-REQUIRED_LAN_SUBNET = "192.168.88.0/24"
-REQUIRED_LAN_GATEWAY = "192.168.88.1"
 REQUIRED_HOTSPOT_DNS_NAME = "hotspot.wifi-pay.local"
 DEFAULT_DNS_SERVERS = "8.8.8.8,1.1.1.1"
 REQUIRED_WALLED_GARDEN_HOSTS = [
@@ -68,6 +67,76 @@ def ensure_rule(resource, expected: Dict, apply: bool, name: str) -> bool:
         print(f"[FIX] Added: {name}")
         return True
     return False
+
+
+def parse_cidr(address: str) -> tuple[str, str] | tuple[None, None]:
+    try:
+        iface = ipaddress.ip_interface(address)
+    except ValueError:
+        return None, None
+    return str(iface.network), str(iface.ip)
+
+
+def inspect_router_topology(api, cfg: Dict) -> Dict[str, str]:
+    hotspot_rows = api.get_resource("/ip/hotspot").call("print")
+    hotspot_profiles = api.get_resource("/ip/hotspot/profile").call("print")
+    address_rows = api.get_resource("/ip/address").call("print")
+
+    hotspot_server = hotspot_rows[0] if hotspot_rows else {}
+    hotspot_profile_name = hotspot_server.get("profile")
+    hotspot_profile = first(hotspot_profiles, lambda r: r.get("name") == hotspot_profile_name) if hotspot_profile_name else None
+
+    lan_interface = str(hotspot_server.get("interface") or "bridge").strip() or "bridge"
+    lan_gateway = None
+    lan_subnet = None
+    wg_interface = None
+    wan_interface = None
+
+    for row in address_rows:
+        iface_name = str(row.get("interface") or row.get("actual-interface") or "").strip()
+        subnet, ip_addr = parse_cidr(str(row.get("address") or ""))
+        if not subnet or not ip_addr:
+            continue
+
+        if iface_name == lan_interface and not lan_gateway:
+            lan_gateway = ip_addr
+            lan_subnet = subnet
+
+        if ip_addr == cfg.get("ip") and not wg_interface:
+            wg_interface = iface_name
+
+    if not lan_gateway:
+        hotspot_ip = str(hotspot_server.get("ip-of-dns-name") or "").strip() or str(
+            (hotspot_profile or {}).get("hotspot-address") or ""
+        ).strip()
+        if hotspot_ip:
+            for row in address_rows:
+                iface_name = str(row.get("interface") or row.get("actual-interface") or "").strip()
+                subnet, ip_addr = parse_cidr(str(row.get("address") or ""))
+                if ip_addr == hotspot_ip:
+                    lan_interface = iface_name or lan_interface
+                    lan_gateway = ip_addr
+                    lan_subnet = subnet
+                    break
+
+    for row in address_rows:
+        iface_name = str(row.get("interface") or row.get("actual-interface") or "").strip()
+        subnet, ip_addr = parse_cidr(str(row.get("address") or ""))
+        if not subnet or not ip_addr:
+            continue
+        if iface_name in {lan_interface, wg_interface}:
+            continue
+        if ip_addr != cfg.get("ip"):
+            wan_interface = iface_name
+            break
+
+    return {
+        "lan_interface": lan_interface or "bridge",
+        "lan_gateway": lan_gateway or "",
+        "lan_subnet": lan_subnet or "",
+        "wg_interface": wg_interface or "wireguard1",
+        "wan_interface": wan_interface or "ether1",
+    }
 
 
 def ensure_walled_garden(api, apply: bool) -> int:
@@ -187,35 +256,42 @@ def check_hotspot_profile(api, apply: bool) -> int:
     return changed
 
 
-def check_dhcp_network(api, apply: bool) -> int:
+def check_dhcp_network(api, apply: bool, topology: Dict[str, str]) -> int:
     dhcp_network = api.get_resource("/ip/dhcp-server/network")
     rows = dhcp_network.call("print")
     changed = 0
 
-    network = first(rows, lambda r: str(r.get("address", "")).strip() == REQUIRED_LAN_SUBNET)
+    required_lan_subnet = topology.get("lan_subnet") or ""
+    required_lan_gateway = topology.get("lan_gateway") or ""
+
+    if not required_lan_subnet or not required_lan_gateway:
+        print("[WARN] Could not infer LAN subnet/gateway from router state")
+        return changed
+
+    network = first(rows, lambda r: str(r.get("address", "")).strip() == required_lan_subnet)
     if not network:
-        print(f"[WARN] DHCP network {REQUIRED_LAN_SUBNET} not found")
+        print(f"[WARN] DHCP network {required_lan_subnet} not found")
         return changed
 
     dns_server = str(network.get("dns-server", network.get("dns_server", ""))).strip()
     gateway = str(network.get("gateway", "")).strip()
-    dns_ok = REQUIRED_LAN_GATEWAY in [x.strip() for x in dns_server.split(",") if x.strip()]
+    dns_ok = required_lan_gateway in [x.strip() for x in dns_server.split(",") if x.strip()]
 
-    if gateway == REQUIRED_LAN_GATEWAY and dns_ok:
-        print(f"[OK] DHCP network {REQUIRED_LAN_SUBNET} gateway={gateway} dns-server={dns_server}")
+    if gateway == required_lan_gateway and dns_ok:
+        print(f"[OK] DHCP network {required_lan_subnet} gateway={gateway} dns-server={dns_server}")
         return changed
 
-    print(f"[MISS] DHCP network {REQUIRED_LAN_SUBNET} gateway={gateway or '-'} dns-server={dns_server or '-'}")
+    print(f"[MISS] DHCP network {required_lan_subnet} gateway={gateway or '-'} dns-server={dns_server or '-'}")
     if apply:
         dhcp_network.call(
             "set",
             arguments={
                 ".id": network.get("id") or network.get(".id"),
-                "gateway": REQUIRED_LAN_GATEWAY,
-                "dns-server": REQUIRED_LAN_GATEWAY,
+                "gateway": required_lan_gateway,
+                "dns-server": required_lan_gateway,
             },
         )
-        print(f"[FIX] DHCP network {REQUIRED_LAN_SUBNET} set gateway={REQUIRED_LAN_GATEWAY} dns-server={REQUIRED_LAN_GATEWAY}")
+        print(f"[FIX] DHCP network {required_lan_subnet} set gateway={required_lan_gateway} dns-server={required_lan_gateway}")
         changed += 1
     return changed
 
@@ -230,10 +306,11 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
 
     try:
         pool, api = connect_api(cfg)
+        topology = inspect_router_topology(api, cfg)
 
         changes += check_dns_settings(api, apply)
         changes += check_hotspot_profile(api, apply)
-        changes += check_dhcp_network(api, apply)
+        changes += check_dhcp_network(api, apply, topology)
         changes += check_api_service(api, apply)
 
         fw_filter = api.get_resource("/ip/firewall/filter")
@@ -249,7 +326,7 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
                     "protocol": "tcp",
                     "src-address": REQUIRED_WG_IP,
                     "dst-port": "8728",
-                    "in-interface": "wireguard1",
+                    "in-interface": topology["wg_interface"],
                     "comment": "allow_api_from_vps",
                 },
                 apply,
@@ -263,8 +340,8 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
                 {
                     "chain": "forward",
                     "action": "accept",
-                    "in-interface": "bridge",
-                    "out-interface": "ether1",
+                    "in-interface": topology["lan_interface"],
+                    "out-interface": topology["wan_interface"],
                     "comment": "FORWARD_LAN_TO_WAN",
                 },
                 apply,
@@ -278,8 +355,8 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
                 {
                     "chain": "forward",
                     "action": "accept",
-                    "in-interface": "ether1",
-                    "out-interface": "bridge",
+                    "in-interface": topology["wan_interface"],
+                    "out-interface": topology["lan_interface"],
                     "comment": "FORWARD_WAN_TO_LAN",
                 },
                 apply,
@@ -293,7 +370,7 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
                 {
                     "chain": "srcnat",
                     "action": "masquerade",
-                    "out-interface": "ether1",
+                    "out-interface": topology["wan_interface"],
                     "comment": "NAT_TO_INTERNET",
                 },
                 apply,
@@ -304,9 +381,9 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
         changes += int(
             ensure_rule(
                 if_list_member,
-                {"list": "LAN", "interface": "wireguard1"},
+                {"list": "LAN", "interface": topology["wg_interface"]},
                 apply,
-                "wireguard1 in LAN list",
+                f"{topology['wg_interface']} in LAN list",
             )
         )
 
