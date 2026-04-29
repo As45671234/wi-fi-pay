@@ -2637,18 +2637,34 @@ async def kaspi_check_pay_docs():
     )
 
 
-@app.post("/api/kaspi/check")
+async def _parse_kaspi_request_data(request: Request) -> dict:
+    """Parse Kaspi request from either GET query params or POST JSON body."""
+    if request.method == "GET":
+        q = dict(request.query_params)
+        return q
+    try:
+        data = await request.json()
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    # fallback: try form data
+    try:
+        form = await request.form()
+        return dict(form)
+    except Exception:
+        pass
+    return {}
+
+
+@app.api_route("/api/kaspi/check", methods=["GET", "POST"])
 async def kaspi_check(request: Request):
     if not _has_valid_checkpay_auth(request):
         return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
 
-    try:
-        data = await request.json()
-    except Exception:
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid JSON")
-
-    if not isinstance(data, dict):
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Request body must be JSON object")
+    data = await _parse_kaspi_request_data(request)
+    if not data:
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid request")
 
     request_id = _kaspi_request_id(data)
     contract_number = _normalize_contract_number(
@@ -2726,18 +2742,14 @@ async def kaspi_check(request: Request):
     )
 
 
-@app.post("/api/kaspi/pay")
+@app.api_route("/api/kaspi/pay", methods=["GET", "POST"])
 async def kaspi_pay(request: Request):
     if not _has_valid_checkpay_auth(request):
         return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
 
-    try:
-        data = await request.json()
-    except Exception:
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid JSON")
-
-    if not isinstance(data, dict):
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Request body must be JSON object")
+    data = await _parse_kaspi_request_data(request)
+    if not data:
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid request")
 
     request_id = _kaspi_request_id(data)
     contract_number = _normalize_contract_number(
