@@ -1,5 +1,6 @@
 import os
 import asyncio
+import base64
 import hashlib
 import hmac
 import time
@@ -129,7 +130,16 @@ def _normalize_tariff(raw: dict) -> dict | None:
     }
 
 
+_tariffs_cache: list[dict] | None = None
+_tariffs_cache_ts: float = 0.0
+_TARIFFS_CACHE_TTL = 60.0  # seconds
+
+
 def load_tariffs_config() -> list[dict]:
+    global _tariffs_cache, _tariffs_cache_ts
+    now = time.monotonic()
+    if _tariffs_cache is not None and (now - _tariffs_cache_ts) < _TARIFFS_CACHE_TTL:
+        return _tariffs_cache
     default = [
         {"amount": 500, "minutes": 60, "title": "1 час доступа", "subtitle": "Час бесплатно¯", "badge": "Популярное"},
         {"amount": 1000, "minutes": 180, "title": "3 часа доступа", "subtitle": "Час бесплатно* * * *", "badge": ""},
@@ -160,12 +170,11 @@ def load_tariffs_config() -> list[dict]:
         normalized.append(t)
 
     if not normalized:
-        normalized = [
-            _normalize_tariff(x) for x in default
-            if _normalize_tariff(x) is not None
-        ]
+        normalized = [t for t in (_normalize_tariff(x) for x in default) if t is not None]
 
     normalized.sort(key=lambda x: x["amount"])
+    _tariffs_cache = normalized
+    _tariffs_cache_ts = time.monotonic()
     return normalized
 
 
@@ -401,7 +410,13 @@ def get_client_ip(request: Request) -> str:
 def is_trial_rate_limited(request: Request) -> bool:
     ip = get_client_ip(request)
     now = int(time.time())
-    recent =[
+    # Prevent unbounded growth: flush when bucket has too many stale IPs
+    if len(TRIAL_RATE_BUCKET) > 2000:
+        cutoff = now - TRIAL_RATE_LIMIT_WINDOW_SECONDS
+        stale = [k for k, v in TRIAL_RATE_BUCKET.items() if not v or max(v) < cutoff]
+        for k in stale:
+            del TRIAL_RATE_BUCKET[k]
+    recent = [
         ts for ts in TRIAL_RATE_BUCKET.get(ip, [])
         if now - ts < TRIAL_RATE_LIMIT_WINDOW_SECONDS
     ]
@@ -484,7 +499,6 @@ def _make_device_cookie(mac: str, router_id: str) -> str:
     """Создать подписанную cookie: base64(mac|router_id).HMAC."""
     payload = f"{mac}|{router_id}"
     sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
-    import base64
     encoded = base64.urlsafe_b64encode(payload.encode()).decode()
     return f"{encoded}.{sig}"
 
@@ -494,7 +508,6 @@ def _parse_device_cookie(cookie_value: str) -> tuple[str, str] | None:
     if not cookie_value:
         return None
     try:
-        import base64
         parts = cookie_value.split(".")
         if len(parts) != 2:
             return None
@@ -2058,9 +2071,24 @@ async def client_event(request: Request):
     return utf8_json_response({"ok": True})
 
 
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or "").strip()
+
+
+def _has_admin_auth(request: Request) -> bool:
+    """Check ADMIN_TOKEN for internal diagnostic endpoints. If token not set, disables access."""
+    if not ADMIN_TOKEN:
+        return False
+    header = (request.headers.get("x-admin-token") or "").strip()
+    auth = (request.headers.get("authorization") or "").strip()
+    bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    return hmac.compare_digest(header, ADMIN_TOKEN) or hmac.compare_digest(bearer, ADMIN_TOKEN)
+
+
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """Диагностика всех роутеров"""
+    if not _has_admin_auth(request):
+        return utf8_json_response({"error": "Unauthorized"}, status_code=401)
     logger.info("🩺 HEALTH CHECK: проверка всех роутеров...")
     health_report = {
         "timestamp": datetime.now(KZ_TZ).isoformat(),
@@ -2114,8 +2142,10 @@ async def health_check():
 
 
 @app.get("/debug")
-async def debug_router_status(mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+async def debug_router_status(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     """Подробная диагностика конкретного MAC на роутере"""
+    if not _has_admin_auth(request):
+        return utf8_json_response({"error": "Unauthorized"}, status_code=401)
     logger.info(f"🔍 DEBUG запрос: MAC={mac}, router={router_id}")
     
     config = ROUTERS_CONFIG.get(router_id)
@@ -2932,29 +2962,22 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
 
 @app.get("/activate_welcome")
 async def activate_welcome(request: Request, mac: str, router_id: str = "astana_01"):
+    """Legacy redirect: устаревший endpoint, сохранён для обратной совместимости.
+    PAY_WINDOW теперь создаётся через /api/prepare_access из welcome.html.
+    Этот endpoint только редиректит на /tariffs (без создания MikroTik доступа).
+    """
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         logger.warning(f"[activate_welcome] Некорректный MAC: {mac}")
         return utf8_json_response({"error": "Некорректный MAC"}, status_code=400)
-
     if router_id not in ROUTERS_CONFIG:
         logger.error(f"[activate_welcome] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at) VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
-            (mac, router_id, expires_at),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    # PAY_WINDOW создаётся синхронно через /api/prepare_access из welcome.html
-    # activate_welcome теперь только создаёт запись в БД и редиректит
-    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
-    return RedirectResponse(url=tariff_url, status_code=302)
+    logger.warning(f"[activate_welcome] legacy call mac={mac[:8]}*** router={router_id} — redirecting to welcome flow")
+    return RedirectResponse(
+        url=f"/?{urlencode({'mac': mac, 'router_id': router_id})}",
+        status_code=302,
+    )
 
 
 @app.post("/get_free_trial")
