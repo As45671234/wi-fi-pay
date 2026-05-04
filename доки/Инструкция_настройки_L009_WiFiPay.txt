@@ -1,0 +1,337 @@
+ИНСТРУКЦИЯ: СБРОС И НАСТРОЙКА MIKROTIK L009 ДЛЯ WIFI-PAY
+Версия: 2026-05-04
+Модель: MikroTik L009UiGS-2HaxD-IN (L009 / "L900")
+
+============================================================
+0) ОСОБЕННОСТИ МОДЕЛИ L009
+============================================================
+- RouterOS 7.x стоит "из коробки" — WireGuard уже есть
+- 1x Wi-Fi 2.4GHz (wlan1), нет 5GHz
+- 9x Gigabit Ethernet + 1x SFP
+- Кнопка RESET — на нижней части корпуса
+- Порт PoE-in — ether1 (WAN)
+
+============================================================
+1) СБРОС ДО ЗАВОДСКИХ НАСТРОЕК
+============================================================
+
+МЕТОД A — Кнопка RESET (рекомендуется):
+1. Роутер включён и загружен
+2. Нажать и держать кнопку RESET (на нижней части)
+3. Держать ~5 секунд — LED начинает мигать
+4. Отпустить кнопку
+5. Роутер перезагрузится с конфигурацией по умолчанию
+
+МЕТОД B — через WinBox / терминал:
+/system reset-configuration no-defaults=no keep-users=no
+
+МЕТОД C — Hard reset (полный сброс, если не загружается):
+1. Отключить питание
+2. Зажать кнопку RESET
+3. Подать питание, держать кнопку ещё ~5-7 секунд до 3 миганий LED
+4. Отпустить — роутер уйдёт в режим Netinstall
+   (Этот метод нужен только если RouterOS не загружается)
+
+После сброса (МЕТОД A / B):
+- IP по умолчанию: 192.168.88.1
+- Логин: admin, пароль: (пустой)
+- Подключиться кабелем к ether2-ether9 (не ether1!)
+
+============================================================
+2) ПЕРВЫЙ ВХОД И ПОДГОТОВКА
+============================================================
+1. Подключить кабель: PC -> ether2 (не ether1)
+2. Открыть WinBox -> Neighbors -> найти роутер -> Connect
+   (или через браузер http://192.168.88.1)
+3. Login: admin, Password: (пустой) -> OK
+4. Закрыть мастер QuickSet если появился
+
+ВАЖНО: Если RouterOS 6.x (маловероятно для новых L009), сначала обновить до 7.x:
+System -> Packages -> Check For Updates -> Channel: stable -> Download & Install
+
+============================================================
+3) БАЗОВАЯ СЕТЬ (WAN / LAN)
+============================================================
+
+3.1 WAN (ether1)
+На L009 после сброса обычно уже есть DHCP Client на ether1.
+Проверить: IP -> DHCP Client -> должен быть ether1 с address-dynamic.
+Если нет — добавить вручную:
+IP -> DHCP Client -> Add -> Interface: ether1
+
+3.2 Bridge и LAN-порты
+После сброса обычно есть bridge с ether2-ether9 и wlan1.
+Проверить: Bridge -> Ports — все LAN порты и wlan1 должны быть в bridge.
+
+Если bridge нет — создать:
+Bridge -> Bridge -> Add -> Name: bridge
+
+Bridge -> Ports -> Add:
+  Interface: ether2, Bridge: bridge
+  ... повторить для ether3-ether9 и wlan1
+
+3.3 IP-адрес LAN
+IP -> Addresses:
+- Адрес: 192.168.88.1/24, Interface: bridge
+(После сброса обычно уже есть)
+
+3.4 DHCP Server
+IP -> DHCP Server:
+- DHCP Server на bridge, пул 192.168.88.100-192.168.88.254
+
+IP -> DHCP Server -> Networks:
+- Network: 192.168.88.0/24
+- Gateway: 192.168.88.1
+- DNS Servers: 192.168.88.1   <-- ОБЯЗАТЕЛЬНО! Иначе Android не резолвит portal
+
+============================================================
+4) DNS (КРИТИЧНО ДЛЯ ANDROID / OPPO)
+============================================================
+IP -> DNS:
+- Allow Remote Requests: YES  <-- обязательно!
+- Servers: 8.8.8.8
+           1.1.1.1
+
+Без этого на Android/OPPO будет ERR_NAME_NOT_RESOLVED вместо портала.
+
+Через терминал:
+/ip dns set allow-remote-requests=yes servers=8.8.8.8,1.1.1.1
+
+============================================================
+5) WI-FI (wlan1)
+============================================================
+Wireless -> Interfaces -> wlan1 (двойной клик):
+Вкладка General:
+- Mode: ap bridge
+- SSID: Wifi-Pay-15  (или следующий номер по порядку)
+- Band: 2GHz-b/g/n
+- Channel Width: 20/40MHz Ce
+
+Вкладка Security:
+- Security Profile: default (без пароля) — открытая сеть
+
+Убедиться, что wlan1 добавлен в bridge:
+Bridge -> Ports -> Add -> Interface: wlan1, Bridge: bridge
+
+Через терминал (быстрее):
+/interface wireless set wlan1 mode=ap-bridge ssid="Wifi-Pay-15" disabled=no
+/interface bridge port add bridge=bridge interface=wlan1
+
+============================================================
+6) HOTSPOT
+============================================================
+6.1 Запуск мастера
+IP -> Hotspot -> Hotspot Setup:
+- Interface: bridge -> Next
+- Пройти все шаги мастера (IP, DNS, SMTP пропустить, Local User пропустить)
+
+6.2 Настройка Server Profile (hsprof1)
+IP -> Hotspot -> Server Profiles -> hsprof1:
+
+Вкладка General:
+- DNS Name: hotspot.wifi-pay.local
+- HTML Directory: hotspot
+
+Вкладка Login:
+- HTTP CHAP: YES (оставить)
+- Cookie: NO  <-- отключить
+- MAC Cookie: NO  <-- отключить
+- HTTP PAP: NO
+- HTTPS: NO
+
+============================================================
+7) WALLED GARDEN
+============================================================
+IP -> Hotspot -> Walled Garden -> Add:
+Добавить ТОЛЬКО эти три (HTTP и HTTPS для каждого):
+
+  Dst. Host: wifi-pay.kz        Action: allow
+  Dst. Host: www.wifi-pay.kz    Action: allow
+  Dst. Host: api.freedompay.kz  Action: allow
+
+НЕ ДОБАВЛЯТЬ (ломает iPhone popup):
+  captive.apple.com
+  www.apple.com
+  connectivitycheck.gstatic.com
+  clients3.google.com
+  connect.rom.miui.com
+
+============================================================
+8) NTP / ВРЕМЯ
+============================================================
+ОБЯЗАТЕЛЬНО — без синхронизации времени scheduler на роутере
+будет создавать неправильные задачи очистки доступа!
+
+System -> NTP Client:
+- Enabled: yes
+- Primary NTP: 216.239.35.0
+- Secondary NTP: 216.239.35.4
+- Дождаться Status: synchronized
+
+System -> Clock:
+- Time Zone Name: Asia/Almaty
+
+Через терминал:
+/system ntp client set enabled=yes primary-ntp=216.239.35.0 secondary-ntp=216.239.35.4
+/system clock set time-zone-name=Asia/Almaty
+
+============================================================
+9) WIREGUARD
+============================================================
+Следующий свободный ID: astana_15 -> IP 10.0.0.16
+(последний занятый: astana_14 -> 10.0.0.15)
+
+9.1 На роутере L009
+WireGuard -> Add New Interface:
+- Name: wireguard1
+- Listen Port: любой (например 13231)
+- Скопировать Public Key роутера (он генерируется автоматически)
+
+IP -> Addresses -> Add:
+- Address: 10.0.0.16/24
+- Interface: wireguard1
+
+WireGuard -> Peers -> Add:
+- Interface: wireguard1
+- Public Key: XNSGO48vf8JDFE6gPw+4HpG+DerPDBpwDUCMw+wlnCA=
+- Endpoint: 46.247.42.123:443
+- Allowed Address: 10.0.0.0/24
+- Persistent Keepalive: 25
+
+9.2 На VPS (выполнить по SSH)
+sudo nano /etc/wireguard/wg0.conf
+
+Добавить в конец файла:
+[Peer]
+# astana_15
+PublicKey = <PUBLIC_KEY_РОУТЕРА_L009>
+AllowedIPs = 10.0.0.16/32
+
+Сохранить (Ctrl+O, Enter, Ctrl+X), затем:
+sudo systemctl restart wg-quick@wg0
+
+Проверка:
+ping -c 3 10.0.0.16
+
+============================================================
+10) ДОСТУП BACKEND К API РОУТЕРА
+============================================================
+Открыть New Terminal в WinBox и выполнить ВСЁ одним блоком:
+
+# Установить пароль admin
+/user set [find name="admin"] password="kaspiwifiadmin2026"
+
+# Включить API сервис
+/ip service set api disabled=no port=8728 address=0.0.0.0/0
+
+# Разрешить API с VPS через WireGuard
+/ip firewall filter add chain=input action=accept protocol=tcp src-address=10.0.0.1 dst-port=8728 in-interface=wireguard1 comment="allow_api_from_vps" place-before=0
+
+# Разрешить forwarding LAN <-> WAN
+/ip firewall filter add chain=forward action=accept in-interface=bridge out-interface=ether1 comment="FORWARD_LAN_TO_WAN"
+/ip firewall filter add chain=forward action=accept in-interface=ether1 out-interface=bridge comment="FORWARD_WAN_TO_LAN"
+
+# Добавить WireGuard в LAN list (чтобы firewall не дропал пакеты с VPS)
+/interface list member add list=LAN interface=wireguard1
+
+# NAT в интернет
+/ip firewall nat add chain=srcnat action=masquerade out-interface=ether1 comment="NAT_TO_INTERNET"
+
+# MSS fix для туннеля (решает проблему с зависанием загрузки страниц)
+/ip firewall mangle remove [find comment="MTU_FIX"]
+/ip firewall mangle add chain=forward action=change-mss new-mss=1300 passthrough=yes tcp-flags=syn protocol=tcp tcp-mss=1301-65535 comment="MTU_FIX" place-before=0
+
+# IP-адрес на WireGuard (на случай если не назначили через GUI)
+/ip address add address=10.0.0.16/24 interface=wireguard1
+
+Проверка с VPS:
+nc -vz -w3 10.0.0.16 8728   => должно быть "succeeded"
+ping 10.0.0.16               => должно пинговаться
+
+============================================================
+11) ОБНОВЛЕНИЕ BACKEND НА VPS
+============================================================
+11.1 Добавить роутер в routers_config.json
+На VPS выполнить или через git:
+
+Добавить в конец массива в ~/wi-fi-pay/routers_config.json:
+  {
+    "id": "astana_15",
+    "ip": "10.0.0.16",
+    "user": "admin",
+    "pass": "kaspiwifiadmin2026",
+    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
+  }
+
+11.2 Обновить login.html на роутере
+В файле login/login.html заменить router_id на astana_15.
+Скопировать файл в /flash/hotspot/login.html на роутере.
+
+11.3 Деплой
+cd ~/wi-fi-pay
+git pull
+sudo systemctl restart wifi-pay
+sudo systemctl status wifi-pay --no-pager
+
+============================================================
+12) ПРОВЕРКА ПОСЛЕ НАСТРОЙКИ
+============================================================
+1. Подключиться телефоном к Wi-Fi "Wifi-Pay-15"
+2. Должен открыться портал выбора тарифов
+3. Нажать TRIAL 15 минут — интернет должен заработать
+4. Проверить оплату 500 тг (если нужно)
+5. Проверить с VPS:
+   ROUTER_IPS=10.0.0.2,10.0.0.3,...,10.0.0.16 ./list_clients.sh
+
+============================================================
+13) ТИПОВЫЕ ПРОБЛЕМЫ
+============================================================
+Проблема: nc -vz 10.0.0.16 8728 — timeout
+- Проверить /ip service api (disabled=no?)
+- Проверить firewall: /ip firewall filter print — есть ли allow_api_from_vps?
+- Проверить что wireguard1 пингуется: ping 10.0.0.16
+
+Проблема: ping 10.0.0.16 не идёт
+- На VPS: sudo wg show — есть ли peer с PublicKey роутера?
+- На роутере: WireGuard -> Peers -> статус Handshake
+- Проверить что IP назначен: /ip address print
+
+Проблема: iPhone не показывает popup портала
+- Убрать captive.apple.com из Walled Garden
+- Открыть вручную http://neverssl.com в Safari
+
+Проблема: Android ERR_NAME_NOT_RESOLVED
+- /ip dns get allow-remote-requests -> должно быть yes
+- IP -> DHCP Server -> Networks -> DNS Servers = 192.168.88.1
+
+Проблема: интернет не работает у клиентов даже после bypass
+- Проверить FORWARD правила в firewall
+- Проверить NAT: /ip firewall nat print
+- Проверить MTU_FIX в mangle
+
+============================================================
+14) ФИНАЛЬНЫЙ ЧЕКЛИСТ
+============================================================
+[ ] RouterOS 7.x (проверить: /system package print)
+[ ] SSID задан: Wifi-Pay-15
+[ ] wlan1 в bridge
+[ ] Hotspot setup на bridge, hsprof1: DNS Name=hotspot.wifi-pay.local
+[ ] IP -> DNS: Allow Remote Requests=yes, серверы 8.8.8.8, 1.1.1.1
+[ ] DHCP Network: DNS Servers = 192.168.88.1
+[ ] Walled Garden: только wifi-pay.kz, www.wifi-pay.kz, api.freedompay.kz
+[ ] NTP synchronized, timezone Asia/Almaty
+[ ] wireguard1 поднят, IP 10.0.0.16/24 назначен
+[ ] Peer VPS добавлен на роутере
+[ ] Peer роутера добавлен на VPS (AllowedIPs 10.0.0.16/32)
+[ ] ping 10.0.0.16 с VPS — OK
+[ ] nc -vz -w3 10.0.0.16 8728 — succeeded
+[ ] Пароль admin: kaspiwifiadmin2026
+[ ] API 8728 включён (/ip service)
+[ ] Firewall: allow_api_from_vps, FORWARD_LAN_TO_WAN/WAN_TO_LAN, NAT
+[ ] MTU_FIX в mangle
+[ ] astana_15 добавлен в routers_config.json на VPS
+[ ] login.html обновлён (router_id=astana_15)
+[ ] wifi-pay сервис перезапущен
+[ ] Портал открывается, trial/оплата проверены
+
+Конец документа.
