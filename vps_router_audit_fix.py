@@ -256,6 +256,90 @@ def check_hotspot_profile(api, apply: bool) -> int:
     return changed
 
 
+def check_hotspot_login_method(api, apply: bool) -> int:
+    """Ensure hsprof1 has login-by=http-chap (required for captive portal to work)."""
+    hotspot = api.get_resource("/ip/hotspot/profile")
+    rows = hotspot.call("print")
+    changed = 0
+
+    profile = first(rows, lambda r: r.get("name") == "hsprof1") or (rows[0] if rows else None)
+    if not profile:
+        print("[WARN] check_hotspot_login_method: no profile found")
+        return changed
+
+    login_by = str(profile.get("login-by", "")).strip().lower()
+    # RouterOS returns comma-separated list like "http-chap,http-pap" or just "http-chap"
+    methods = {m.strip() for m in login_by.split(",") if m.strip()}
+    bad_methods = methods - {"http-chap"}  # only http-chap should be present
+
+    if "http-chap" in methods and not bad_methods:
+        print(f"[OK] Hotspot profile {profile.get('name')} login-by=http-chap")
+        return changed
+
+    print(f"[MISS] Hotspot profile {profile.get('name')} login-by={login_by or '(empty)'} — expected http-chap only")
+    if apply:
+        hotspot.call(
+            "set",
+            arguments={
+                ".id": profile.get("id") or profile.get(".id"),
+                "login-by": "http-chap",
+            },
+        )
+        print(f"[FIX] Hotspot profile {profile.get('name')} set login-by=http-chap")
+        changed += 1
+    return changed
+
+
+def check_dns_static(api, apply: bool, topology: Dict[str, str]) -> int:
+    """Ensure /ip dns static has entry hotspot.wifi-pay.local -> LAN gateway.
+
+    Without this the hotspot server shows INVALID and does not block internet.
+    """
+    lan_gateway = topology.get("lan_gateway") or ""
+    if not lan_gateway:
+        print("[WARN] check_dns_static: LAN gateway unknown, skipping")
+        return 0
+
+    dns_static = api.get_resource("/ip/dns/static")
+    rows = dns_static.call("print")
+    changed = 0
+
+    existing = first(
+        rows,
+        lambda r: str(r.get("name", "")).strip().lower() == REQUIRED_HOTSPOT_DNS_NAME.lower(),
+    )
+
+    if existing:
+        current_addr = str(existing.get("address", "")).strip()
+        if current_addr == lan_gateway:
+            print(f"[OK] DNS static {REQUIRED_HOTSPOT_DNS_NAME} -> {lan_gateway}")
+            return changed
+        print(f"[MISS] DNS static {REQUIRED_HOTSPOT_DNS_NAME} -> {current_addr} (expected {lan_gateway})")
+        if apply:
+            dns_static.call(
+                "set",
+                arguments={
+                    ".id": existing.get("id") or existing.get(".id"),
+                    "address": lan_gateway,
+                },
+            )
+            print(f"[FIX] DNS static updated {REQUIRED_HOTSPOT_DNS_NAME} -> {lan_gateway}")
+            changed += 1
+    else:
+        print(f"[MISS] DNS static {REQUIRED_HOTSPOT_DNS_NAME} not found")
+        if apply:
+            dns_static.call(
+                "add",
+                arguments={
+                    "name": REQUIRED_HOTSPOT_DNS_NAME,
+                    "address": lan_gateway,
+                },
+            )
+            print(f"[FIX] DNS static added {REQUIRED_HOTSPOT_DNS_NAME} -> {lan_gateway}")
+            changed += 1
+    return changed
+
+
 def check_dhcp_network(api, apply: bool, topology: Dict[str, str]) -> int:
     dhcp_network = api.get_resource("/ip/dhcp-server/network")
     rows = dhcp_network.call("print")
@@ -310,6 +394,8 @@ def audit_and_fix(router_id: str, apply: bool) -> int:
 
         changes += check_dns_settings(api, apply)
         changes += check_hotspot_profile(api, apply)
+        changes += check_hotspot_login_method(api, apply)
+        changes += check_dns_static(api, apply, topology)
         changes += check_dhcp_network(api, apply, topology)
         changes += check_api_service(api, apply)
 
