@@ -1,5 +1,6 @@
 import os
 import asyncio
+import base64
 import hashlib
 import hmac
 import time
@@ -129,7 +130,16 @@ def _normalize_tariff(raw: dict) -> dict | None:
     }
 
 
+_tariffs_cache: list[dict] | None = None
+_tariffs_cache_ts: float = 0.0
+_TARIFFS_CACHE_TTL = 60.0  # seconds
+
+
 def load_tariffs_config() -> list[dict]:
+    global _tariffs_cache, _tariffs_cache_ts
+    now = time.monotonic()
+    if _tariffs_cache is not None and (now - _tariffs_cache_ts) < _TARIFFS_CACHE_TTL:
+        return _tariffs_cache
     default = [
         {"amount": 500, "minutes": 60, "title": "1 час доступа", "subtitle": "Час бесплатно¯", "badge": "Популярное"},
         {"amount": 1000, "minutes": 180, "title": "3 часа доступа", "subtitle": "Час бесплатно* * * *", "badge": ""},
@@ -160,12 +170,11 @@ def load_tariffs_config() -> list[dict]:
         normalized.append(t)
 
     if not normalized:
-        normalized = [
-            _normalize_tariff(x) for x in default
-            if _normalize_tariff(x) is not None
-        ]
+        normalized = [t for t in (_normalize_tariff(x) for x in default) if t is not None]
 
     normalized.sort(key=lambda x: x["amount"])
+    _tariffs_cache = normalized
+    _tariffs_cache_ts = time.monotonic()
     return normalized
 
 
@@ -350,6 +359,8 @@ def init_db():
         conn.execute("ALTER TABLE kaspi_orders ADD COLUMN activation_error TEXT")
     if 'last_activation_attempt_at' not in k_columns:
         conn.execute("ALTER TABLE kaspi_orders ADD COLUMN last_activation_attempt_at TIMESTAMP")
+    if 'phone' not in k_columns:
+        conn.execute("ALTER TABLE kaspi_orders ADD COLUMN phone TEXT")
 
     cursor.execute("PRAGMA table_info(pending_activations)")
     p_columns = {row[1] for row in cursor.fetchall()}
@@ -399,7 +410,13 @@ def get_client_ip(request: Request) -> str:
 def is_trial_rate_limited(request: Request) -> bool:
     ip = get_client_ip(request)
     now = int(time.time())
-    recent =[
+    # Prevent unbounded growth: flush when bucket has too many stale IPs
+    if len(TRIAL_RATE_BUCKET) > 2000:
+        cutoff = now - TRIAL_RATE_LIMIT_WINDOW_SECONDS
+        stale = [k for k, v in TRIAL_RATE_BUCKET.items() if not v or max(v) < cutoff]
+        for k in stale:
+            del TRIAL_RATE_BUCKET[k]
+    recent = [
         ts for ts in TRIAL_RATE_BUCKET.get(ip, [])
         if now - ts < TRIAL_RATE_LIMIT_WINDOW_SECONDS
     ]
@@ -482,7 +499,6 @@ def _make_device_cookie(mac: str, router_id: str) -> str:
     """Создать подписанную cookie: base64(mac|router_id).HMAC."""
     payload = f"{mac}|{router_id}"
     sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
-    import base64
     encoded = base64.urlsafe_b64encode(payload.encode()).decode()
     return f"{encoded}.{sig}"
 
@@ -492,7 +508,6 @@ def _parse_device_cookie(cookie_value: str) -> tuple[str, str] | None:
     if not cookie_value:
         return None
     try:
-        import base64
         parts = cookie_value.split(".")
         if len(parts) != 2:
             return None
@@ -944,18 +959,36 @@ def _normalize_contract_number(value: str) -> str:
 def _fetch_kaspi_order_by_contract(contract_number: str) -> sqlite3.Row | None:
     conn = get_db()
     conn.row_factory = sqlite3.Row
+    _SQL = """
+        SELECT contract_number, kaspi_order_id, kaspi_status, is_activated,
+               mac_address, router_id, amount, minutes, paid_at, activated_at
+        FROM kaspi_orders
+        WHERE contract_number = ?
+        ORDER BY id DESC
+        LIMIT 1
+    """
     try:
-        return conn.execute(
-            """
-            SELECT contract_number, kaspi_order_id, kaspi_status, is_activated,
-                   mac_address, router_id, amount, minutes, paid_at, activated_at
-            FROM kaspi_orders
-            WHERE contract_number = ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (contract_number,),
-        ).fetchone()
+        row = conn.execute(_SQL, (contract_number,)).fetchone()
+        if row:
+            return row
+        # Fallback: support old contract_number format (A13<MAC_HEX><timestamp>)
+        # Extract MAC from A13 prefix and look up by mac_address
+        m = re.match(r"A13([0-9A-F]{12})", contract_number)
+        if m:
+            mac_hex = m.group(1)
+            mac = ":".join(mac_hex[i:i+2] for i in range(0, 12, 2))
+            return conn.execute(
+                """
+                SELECT contract_number, kaspi_order_id, kaspi_status, is_activated,
+                       mac_address, router_id, amount, minutes, paid_at, activated_at
+                FROM kaspi_orders
+                WHERE mac_address = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (mac,),
+            ).fetchone()
+        return None
     finally:
         conn.close()
 
@@ -1001,22 +1034,24 @@ def _normalize_mac(mac: str) -> str:
 
 
 def _is_valid_mac(mac: str) -> bool:
-    return bool(re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", _normalize_mac(mac)))
+    mac_norm = _normalize_mac(mac)
+    if not re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", mac_norm):
+        return False
+    return mac_norm != "00:00:00:00:00:00"
 
 
 def make_contract_number(mac: str) -> str:
     mac_norm = _normalize_mac(mac)
     if not _is_valid_mac(mac_norm):
         raise ValueError("Некорректный MAC")
-    mac_hex = mac_norm.replace(":", "")
-    ts = int(time.time())
-    nonce = secrets.token_hex(2).upper()
-    return f"A13{mac_hex}{ts}{nonce}"
+    mac_hex = mac_norm.replace(":", "").upper()
+    ts = int(time.time() * 1000)
+    return f"A13{mac_hex}{ts:X}"
 
 
 def parse_contract_number(contract_number: str) -> tuple[str, bool]:
     raw = (contract_number or "").strip().upper()
-    m = re.fullmatch(r"A13([0-9A-F]{12})(\d{10})([0-9A-F]{4})", raw)
+    m = re.match(r"A13([0-9A-F]{12})", raw)
     if not m:
         return "", False
     mac_hex = m.group(1)
@@ -1060,6 +1095,7 @@ def _upsert_kaspi_remote_state(
     kaspi_order_id: str,
     kaspi_status: str,
     paid_at: str | None,
+    phone: str | None = None,
 ) -> None:
     conn = get_db()
     try:
@@ -1072,10 +1108,11 @@ def _upsert_kaspi_remote_state(
                 END,
                 kaspi_status = ?,
                 paid_at = COALESCE(?, paid_at),
+                phone = COALESCE(?, phone),
                 updated_at = CURRENT_TIMESTAMP
             WHERE contract_number = ?
             """,
-            (kaspi_order_id, kaspi_order_id, kaspi_status, paid_at, contract_number),
+            (kaspi_order_id, kaspi_order_id, kaspi_status, paid_at, phone or None, contract_number),
         )
         conn.commit()
     finally:
@@ -1849,13 +1886,52 @@ async def prepare_access(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01", cid: str = ""):
     cid = (cid or make_cid())[:24]
-    logger.info(f"[welcome] cid={cid} mac={mac[:8]}*** router={router_id}")
+    mac_norm = _normalize_mac(mac)
+    logger.info(f"[welcome] cid={cid} mac={mac_norm[:8]}*** router={router_id}")
+
+    if not _is_valid_mac(mac_norm) and router_id in ROUTERS_CONFIG:
+        busy_macs = _get_busy_activation_macs(router_id)
+        fallback_reason = "not_tried"
+        try:
+            fallback_mac, fallback_reason = await asyncio.wait_for(
+                asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
+                timeout=QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            fallback_mac, fallback_reason = None, "router_timeout"
+        except Exception:
+            fallback_mac, fallback_reason = None, "router_error"
+
+        if fallback_mac:
+            logger.info(
+                "[welcome] fallback hit mac=%s router=%s reason=%s cid=%s",
+                fallback_mac[:8] + '***',
+                router_id,
+                fallback_reason,
+                cid,
+            )
+            return RedirectResponse(
+                url=f"/?{urlencode({'mac': fallback_mac, 'router_id': router_id, 'cid': cid})}",
+                status_code=303,
+            )
+
+        logger.info(
+            "[welcome] invalid mac -> qr fallback router=%s reason=%s cid=%s raw_mac=%s",
+            router_id,
+            fallback_reason,
+            cid,
+            mac_norm[:32],
+        )
+        return RedirectResponse(
+            url=f"/q?{urlencode({'router_id': router_id, 'cid': cid})}",
+            status_code=303,
+        )
+
     response = templates.TemplateResponse("welcome.html", {"request": request, "mac": mac, "router_id": router_id, "cid": cid})
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     # Сохраняем MAC в подписанную cookie, чтобы /q мог определить устройство без опроса роутера
-    mac_norm = _normalize_mac(mac)
     if _is_valid_mac(mac_norm) and router_id in ROUTERS_CONFIG:
         _set_device_cookie(response, mac_norm, router_id)
         logger.info("[welcome] cookie set mac=%s router=%s cid=%s", mac_norm[:8] + '***', router_id, cid)
@@ -1995,9 +2071,24 @@ async def client_event(request: Request):
     return utf8_json_response({"ok": True})
 
 
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or "").strip()
+
+
+def _has_admin_auth(request: Request) -> bool:
+    """Check ADMIN_TOKEN for internal diagnostic endpoints. If token not set, disables access."""
+    if not ADMIN_TOKEN:
+        return False
+    header = (request.headers.get("x-admin-token") or "").strip()
+    auth = (request.headers.get("authorization") or "").strip()
+    bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    return hmac.compare_digest(header, ADMIN_TOKEN) or hmac.compare_digest(bearer, ADMIN_TOKEN)
+
+
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """Диагностика всех роутеров"""
+    if not _has_admin_auth(request):
+        return utf8_json_response({"error": "Unauthorized"}, status_code=401)
     logger.info("🩺 HEALTH CHECK: проверка всех роутеров...")
     health_report = {
         "timestamp": datetime.now(KZ_TZ).isoformat(),
@@ -2051,8 +2142,10 @@ async def health_check():
 
 
 @app.get("/debug")
-async def debug_router_status(mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
+async def debug_router_status(request: Request, mac: str = "00:00:00:00:00:00", router_id: str = "astana_01"):
     """Подробная диагностика конкретного MAC на роутере"""
+    if not _has_admin_auth(request):
+        return utf8_json_response({"error": "Unauthorized"}, status_code=401)
     logger.info(f"🔍 DEBUG запрос: MAC={mac}, router={router_id}")
     
     config = ROUTERS_CONFIG.get(router_id)
@@ -2464,6 +2557,20 @@ async def create_kaspi_order(payload: KaspiCreateOrderRequest):
                 created_at,
                 updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(contract_number) DO UPDATE SET
+                local_order_id = excluded.local_order_id,
+                external_order_ref = excluded.external_order_ref,
+                router_id = excluded.router_id,
+                amount = excluded.amount,
+                minutes = excluded.minutes,
+                kaspi_status = 'CREATED',
+                is_activated = 0,
+                kaspi_order_id = NULL,
+                paid_at = NULL,
+                activation_lock = 0,
+                activation_attempts = 0,
+                last_activation_attempt_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
             """,
             (
                 local_order_id,
@@ -2477,8 +2584,6 @@ async def create_kaspi_order(payload: KaspiCreateOrderRequest):
             ),
         )
         conn.commit()
-    except sqlite3.IntegrityError:
-        return utf8_json_response({"error": "Конфликт заказа, повторите"}, status_code=409)
     finally:
         conn.close()
 
@@ -2604,24 +2709,41 @@ async def kaspi_check_pay_docs():
     )
 
 
-@app.post("/api/kaspi/check")
+async def _parse_kaspi_request_data(request: Request) -> dict:
+    """Parse Kaspi request from either GET query params or POST JSON body."""
+    if request.method == "GET":
+        q = dict(request.query_params)
+        return q
+    try:
+        data = await request.json()
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    # fallback: try form data
+    try:
+        form = await request.form()
+        return dict(form)
+    except Exception:
+        pass
+    return {}
+
+
+@app.api_route("/api/kaspi/check", methods=["GET", "POST"])
 async def kaspi_check(request: Request):
     if not _has_valid_checkpay_auth(request):
         return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
 
-    try:
-        data = await request.json()
-    except Exception:
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid JSON")
-
-    if not isinstance(data, dict):
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Request body must be JSON object")
+    data = await _parse_kaspi_request_data(request)
+    if not data:
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid request")
 
     request_id = _kaspi_request_id(data)
     contract_number = _normalize_contract_number(
         _pick_value(data, "contract_number", "contractNumber", "account", "account_id", "order_id", "orderId")
     )
     amount = _pick_amount_value(data, "amount", "sum", "payment_amount", "paymentAmount")
+    phone = _pick_value(data, "phone", "phone_number", "phoneNumber", "subscriber")[:32] or None
 
     if not contract_number:
         return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "contract_number is required", {"can_pay": False})
@@ -2662,6 +2784,18 @@ async def kaspi_check(request: Request):
             },
         )
 
+    if phone:
+        _upsert_kaspi_remote_state(
+            contract_number=contract_number,
+            kaspi_order_id=row["kaspi_order_id"] or "",
+            kaspi_status=kaspi_status or "CREATED",
+            paid_at=None,
+            phone=phone,
+        )
+
+    _, _, amount_to_title, _ = get_tariff_runtime_state()
+    tariff_name = amount_to_title.get(expected_amount, f"Доступ в интернет {expected_amount} ₸")
+
     return _kaspi_response(
         request_id,
         KASPI_CHECKPAY_RESULT_OK,
@@ -2671,6 +2805,8 @@ async def kaspi_check(request: Request):
             "contract_number": row["contract_number"],
             "amount": expected_amount,
             "currency": "KZT",
+            "tariff_name": tariff_name,
+            "service_name": "BusLink — интернет в автобусе",
             "status": kaspi_status or "CREATED",
             "router_id": row["router_id"],
             "minutes": int(row["minutes"] or 0),
@@ -2678,18 +2814,14 @@ async def kaspi_check(request: Request):
     )
 
 
-@app.post("/api/kaspi/pay")
+@app.api_route("/api/kaspi/pay", methods=["GET", "POST"])
 async def kaspi_pay(request: Request):
     if not _has_valid_checkpay_auth(request):
         return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
 
-    try:
-        data = await request.json()
-    except Exception:
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid JSON")
-
-    if not isinstance(data, dict):
-        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Request body must be JSON object")
+    data = await _parse_kaspi_request_data(request)
+    if not data:
+        return _kaspi_response("-", KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "Invalid request")
 
     request_id = _kaspi_request_id(data)
     contract_number = _normalize_contract_number(
@@ -2698,6 +2830,7 @@ async def kaspi_pay(request: Request):
     transaction_id = _pick_value(data, "transaction_id", "transactionId", "txn_id", "txnId", "payment_id", "paymentId")[:128]
     amount = _pick_amount_value(data, "amount", "sum", "payment_amount", "paymentAmount")
     payment_datetime = _pick_value(data, "payment_datetime", "paymentDateTime", "paid_at", "paidAt", "date")
+    phone = _pick_value(data, "phone", "phone_number", "phoneNumber", "subscriber")[:32] or None
 
     if not contract_number:
         return _kaspi_response(request_id, KASPI_CHECKPAY_RESULT_INVALID_REQUEST, "contract_number is required")
@@ -2754,6 +2887,7 @@ async def kaspi_pay(request: Request):
             kaspi_order_id=transaction_id,
             kaspi_status="PAID",
             paid_at=payment_datetime or datetime.utcnow().isoformat(),
+            phone=phone,
         )
         _process_kaspi_paid(contract_number)
     except Exception as e:
@@ -2828,29 +2962,22 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
 
 @app.get("/activate_welcome")
 async def activate_welcome(request: Request, mac: str, router_id: str = "astana_01"):
+    """Legacy redirect: устаревший endpoint, сохранён для обратной совместимости.
+    PAY_WINDOW теперь создаётся через /api/prepare_access из welcome.html.
+    Этот endpoint только редиректит на /tariffs (без создания MikroTik доступа).
+    """
     if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
         logger.warning(f"[activate_welcome] Некорректный MAC: {mac}")
         return utf8_json_response({"error": "Некорректный MAC"}, status_code=400)
-
     if router_id not in ROUTERS_CONFIG:
         logger.error(f"[activate_welcome] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at) VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
-            (mac, router_id, expires_at),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    # PAY_WINDOW создаётся синхронно через /api/prepare_access из welcome.html
-    # activate_welcome теперь только создаёт запись в БД и редиректит
-    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id})}"
-    return RedirectResponse(url=tariff_url, status_code=302)
+    logger.warning(f"[activate_welcome] legacy call mac={mac[:8]}*** router={router_id} — redirecting to welcome flow")
+    return RedirectResponse(
+        url=f"/?{urlencode({'mac': mac, 'router_id': router_id})}",
+        status_code=302,
+    )
 
 
 @app.post("/get_free_trial")
