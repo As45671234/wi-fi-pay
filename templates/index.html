@@ -21,7 +21,8 @@
         /* Полностью автономные стили (без внешних библиотек) */
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; color: #1f2937; }
         .card { background: #ffffff; border-radius: 2.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.05); padding: 2rem; width: 85%; max-width: 420px; text-align: center; border: 1px solid #f1f5f9; }
-        .icon { color: #3b82f6; margin-bottom: 1rem; display: flex; justify-content: center; }
+        .icon { margin-bottom: 0.75rem; display: flex; justify-content: center; }
+        .logo-img { height: 64px; width: auto; object-fit: contain; }
         h1 { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.5rem 0; color: #111827; }
         .desc { color: #9ca3af; font-size: 0.875rem; margin-bottom: 2rem; padding: 0 10px; line-height: 1.3; }
         
@@ -125,12 +126,7 @@
 
     <div class="card">
         <div class="icon">
-            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
-                <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
-                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
-                <line x1="12" y1="20" x2="12.01" y2="20"></line>
-            </svg>
+            <img src="/img/logo.jpeg" alt="BusLink" class="logo-img">
         </div>
         <h1>Высокоскоростной Wi-Fi</h1>
         <p class="desc">Выберите тариф и оплатите картой любого банка</p>
@@ -164,23 +160,23 @@
     // fallback-tariffs:start
     const fallbackTariffs = [
   {
-    "amount": 500,
-    "minutes": 120,
-    "title": "2 часа доступа",
-    "subtitle": "Доступ на 2 часа",
+    "amount": 300,
+    "minutes": 60,
+    "title": "1 час доступа",
+    "subtitle": "Доступ на 1 час",
     "badge": "Популярное"
   },
   {
-    "amount": 1000,
-    "minutes": 240,
-    "title": "4 часа доступа",
-    "subtitle": "Доступ на 4 часа",
+    "amount": 700,
+    "minutes": 180,
+    "title": "3 часа доступа",
+    "subtitle": "Доступ на 3 часа",
     "badge": ""
   },
   {
     "amount": 1500,
     "minutes": 1440,
-    "title": "До конца поездки",
+    "title": "Безлимит 1000 тг (24часа важно!)",
     "subtitle": "Час бесплатно *",
     "badge": "Выгодно!"
   }

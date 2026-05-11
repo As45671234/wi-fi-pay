@@ -1,23 +1,23 @@
 [
   {
-    "amount": 500,
-    "minutes": 120,
-    "title": "2 часа",
-    "subtitle": "Доступ на 2 часа",
+    "amount": 300,
+    "minutes": 60,
+    "title": "1 час доступа",
+    "subtitle": "Доступ на 1 час",
     "badge": "Популярное"
   },
   {
-    "amount": 1000,
-    "minutes": 240,
-    "title": "4 часа",
-    "subtitle": "Доступ на 4 часа",
+    "amount": 700,
+    "minutes": 180,
+    "title": "3 часа доступа",
+    "subtitle": "Доступ на 3 часа",
     "badge": ""
   },
   {
-    "amount": 1500,
+    "amount": 1000,
     "minutes": 1440,
     "title": "До конца поездки",
-    "subtitle": "Час бесплатно *",
+    "subtitle": "Максимум комфорта",
     "badge": "Выгодно!"
   }
 ]
