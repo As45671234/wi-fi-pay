@@ -3257,8 +3257,8 @@ def _collect_router_stats() -> dict:
     def _ensure_router(rid: str) -> dict:
         if rid not in routers:
             routers[rid] = {
-                "freedompay": {"total": 0, "revenue": 0, "today": 0, "week": 0, "month": 0, "by_tariff": {}},
-                "kaspi":      {"total": 0, "revenue": 0, "today": 0, "week": 0, "month": 0, "by_tariff": {}},
+                "freedompay": {"total": 0, "revenue": 0, "today": 0, "today_revenue": 0, "week": 0, "week_revenue": 0, "month": 0, "month_revenue": 0, "by_tariff": {}},
+                "kaspi":      {"total": 0, "revenue": 0, "today": 0, "today_revenue": 0, "week": 0, "week_revenue": 0, "month": 0, "month_revenue": 0, "by_tariff": {}},
                 "trial":      {"total": 0, "today": 0, "week": 0, "month": 0},
             }
         return routers[rid]
@@ -3266,30 +3266,38 @@ def _collect_router_stats() -> dict:
     for r in fp_rows:
         d = _ensure_router(r["router_id"])["freedompay"]
         d["total"]   += r["cnt"]
-        d["revenue"] += r["revenue"]
-        d["today"]   += r["today_cnt"]
-        d["week"]    += r["week_cnt"]
-        d["month"]   += r["month_cnt"]
+        d["revenue"] += r["revenue"] or 0
+        d["today"]   += r["today_cnt"] or 0
+        d["today_revenue"] += r["today_revenue"] or 0
+        d["week"]    += r["week_cnt"] or 0
+        d["week_revenue"] += r["week_revenue"] or 0
+        d["month"]   += r["month_cnt"] or 0
         d["by_tariff"][str(r["amount"])] = {
             "count":   r["cnt"],
             "revenue": r["revenue"],
             "today":   r["today_cnt"],
+            "today_revenue": r["today_revenue"],
             "week":    r["week_cnt"],
+            "week_revenue": r["week_revenue"],
             "month":   r["month_cnt"],
         }
 
     for r in kaspi_rows:
         d = _ensure_router(r["router_id"])["kaspi"]
         d["total"]   += r["cnt"]
-        d["revenue"] += r["revenue"]
-        d["today"]   += r["today_cnt"]
-        d["week"]    += r["week_cnt"]
-        d["month"]   += r["month_cnt"]
+        d["revenue"] += r["revenue"] or 0
+        d["today"]   += r["today_cnt"] or 0
+        d["today_revenue"] += r["today_revenue"] or 0
+        d["week"]    += r["week_cnt"] or 0
+        d["week_revenue"] += r["week_revenue"] or 0
+        d["month"]   += r["month_cnt"] or 0
         d["by_tariff"][str(r["amount"])] = {
             "count":   r["cnt"],
             "revenue": r["revenue"],
             "today":   r["today_cnt"],
+            "today_revenue": r["today_revenue"],
             "week":    r["week_cnt"],
+            "week_revenue": r["week_revenue"],
             "month":   r["month_cnt"],
         }
 
