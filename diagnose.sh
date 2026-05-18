@@ -106,7 +106,7 @@ import time
 from datetime import datetime
 
 try:
-    with open('routers_config.json') as f:
+    with open('routers_config.json', encoding='utf-8-sig') as f:
         routers = json.load(f)
 except Exception as e:
     print(f"✗ Ошибка чтения routers_config.json: {e}")

@@ -30,7 +30,7 @@ if not re.fullmatch(r'([0-9A-F]{2}:){5}[0-9A-F]{2}', mac):
     print(f"❌ Некорректный MAC: {mac}")
     sys.exit(1)
 
-with open('routers_config.json', 'r', encoding='utf-8') as f:
+with open('routers_config.json', 'r', encoding='utf-8-sig') as f:
     routers = json.load(f)
 
 router = next((r for r in routers if r.get('id') == router_id), None)

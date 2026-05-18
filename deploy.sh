@@ -67,7 +67,7 @@ if [ ! -f "$APP_DIR/routers_config.json" ]; then
 fi
 
 # Парсим JSON и проверяем количество роутеров
-ROUTER_COUNT=$(python3 -c "import json; print(len(json.load(open('$APP_DIR/routers_config.json'))))" 2>/dev/null || echo "0")
+ROUTER_COUNT=$(python3 -c "import json; print(len(json.load(open('$APP_DIR/routers_config.json', encoding='utf-8-sig'))))" 2>/dev/null || echo "0")
 if [ "$ROUTER_COUNT" -eq 0 ]; then
     echo "❌ routers_config.json пуст или некорректен!"
     exit 1
@@ -84,7 +84,7 @@ import routeros_api
 import time
 
 try:
-    with open('routers_config.json') as f:
+    with open('routers_config.json', encoding='utf-8-sig') as f:
         routers = json.load(f)
 except Exception as e:
     print(f"❌ Ошибка чтения routers_config.json: {e}")
