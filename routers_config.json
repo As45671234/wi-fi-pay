@@ -1,149 +1,149 @@
-[
-  {
-    "id": "astana_01",
-    "ip": "10.0.0.2",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_02",
-    "ip": "10.0.0.3",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_03",
-    "ip": "10.0.0.4",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_04",
-    "ip": "10.0.0.5",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_05",
-    "ip": "10.0.0.6",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_06",
-    "ip": "10.0.0.7",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_07",
-    "ip": "10.0.0.8",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_08",
-    "ip": "10.0.0.9",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_09",
-    "ip": "10.0.0.10",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_10",
-    "ip": "10.0.0.11",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_11",
-    "ip": "10.0.0.12",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_12",
-    "ip": "10.0.0.13",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_13",
-    "ip": "10.0.0.14",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_14",
-    "ip": "10.0.0.15",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_15",
-    "ip": "10.0.0.16",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_16",
-    "ip": "10.0.0.17",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_17",
-    "ip": "10.0.0.18",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_18",
-    "ip": "10.0.0.19",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_19",
-    "ip": "10.0.0.20",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_20",
-    "ip": "10.0.0.21",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  },
-  {
-    "id": "astana_21",
-    "ip": "10.0.0.22",
-    "user": "admin",
-    "pass": "kaspiwifiadmin2026",
-    "portal_probe_url": "http://captive.apple.com/hotspot-detect.html"
-  }
+﻿[
+    {
+        "id":  "astana_01",
+        "ip":  "10.0.0.2",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_02",
+        "ip":  "10.0.0.3",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_03",
+        "ip":  "10.0.0.4",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_04",
+        "ip":  "10.0.0.5",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_05",
+        "ip":  "10.0.0.6",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_06",
+        "ip":  "10.0.0.7",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_07",
+        "ip":  "10.0.0.8",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_08",
+        "ip":  "10.0.0.9",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_09",
+        "ip":  "10.0.0.10",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_10",
+        "ip":  "10.0.0.11",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_11",
+        "ip":  "10.0.0.12",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_12",
+        "ip":  "10.0.0.13",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_13",
+        "ip":  "10.0.0.14",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_14",
+        "ip":  "10.0.0.15",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_15",
+        "ip":  "10.0.0.16",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_16",
+        "ip":  "10.0.0.17",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_17",
+        "ip":  "10.0.0.18",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_18",
+        "ip":  "10.0.0.19",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_19",
+        "ip":  "10.0.0.20",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_20",
+        "ip":  "10.0.0.21",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_21",
+        "ip":  "10.0.0.22",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    }
 ]

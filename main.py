@@ -72,10 +72,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROUTERS_CONFIG_PATH = os.path.join(BASE_DIR, "routers_config.json")
 TARIFFS_CONFIG_PATH = os.path.join(BASE_DIR, "tariffs_config.json")
 
+# Глобальные учётные данные для роутеров берутся из .env
+# и перезаписывают поля "user"/"pass" из routers_config.json
+ROUTER_USER_ENV = os.getenv("ROUTER_USER", "").strip()
+ROUTER_PASS_ENV = os.getenv("ROUTER_PASS", "").strip()
+
 if os.path.exists(ROUTERS_CONFIG_PATH):
     with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
         routers_list = json.load(f)
     ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
+    # Применяем env-переопределения: .env имеет приоритет над JSON
+    for _r in ROUTERS_CONFIG.values():
+        if ROUTER_USER_ENV:
+            _r["user"] = ROUTER_USER_ENV
+        if ROUTER_PASS_ENV:
+            _r["pass"] = ROUTER_PASS_ENV
 else:
     ROUTERS_CONFIG = {}
 
@@ -185,9 +196,15 @@ def get_tariff_runtime_state() -> tuple[list[dict], dict[int, int], dict[int, st
     allowed_amounts = sorted(amount_to_minutes.keys())
     return tariffs, amount_to_minutes, amount_to_title, allowed_amounts
 
-MERCHANT_ID = os.getenv("MERCHANT_ID") or os.getenv("FREEDOMPAY_MERCHANT_ID") or "581983"
-SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("FREEDOMPAY_SECRET_KEY") or "PMwioQEEEOFbDBAu"
-PAY_URL = os.getenv("PAY_URL") or os.getenv("FREEDOMPAY_API_URL") or "https://api.freedompay.kz/payment.php"
+MERCHANT_ID = (os.getenv("MERCHANT_ID") or os.getenv("FREEDOMPAY_MERCHANT_ID") or "").strip()
+SECRET_KEY = (os.getenv("SECRET_KEY") or os.getenv("FREEDOMPAY_SECRET_KEY") or "").strip()
+PAY_URL = (os.getenv("PAY_URL") or os.getenv("FREEDOMPAY_API_URL") or "https://api.freedompay.kz/payment.php").strip()
+
+if not MERCHANT_ID:
+    logger.critical("MERCHANT_ID не задан в .env! Платежи FreedomPay не будут работать.")
+if not SECRET_KEY:
+    logger.critical("SECRET_KEY не задан в .env! Подписи и HMAC-защита нарушены — сервер не запустится безопасно.")
+    raise RuntimeError("SECRET_KEY is required")
 KZ_TZ = ZoneInfo("Asia/Almaty")
 TRIAL_TOKEN_TTL_SECONDS = 5 * 60
 TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
@@ -535,6 +552,7 @@ def _set_device_cookie(response: Response, mac: str, router_id: str) -> None:
         max_age=_DEVICE_COOKIE_TTL_DAYS * 86400,
         httponly=True,
         samesite="lax",
+        secure=True,
     )
 
 
@@ -2470,7 +2488,9 @@ async def qr_select_mac(mac: str, router_id: str, cid: str = ""):
 
 
 @app.post("/api/activation/process_pending")
-async def process_pending_activations(limit: int = 10):
+async def process_pending_activations(request: Request, limit: int = 10):
+    if not _has_admin_auth(request):
+        return utf8_json_response({"error": "Unauthorized"}, status_code=401)
     limit = max(1, min(100, int(limit)))
     processed = await _drain_pending_activations(limit=limit)
     return utf8_json_response({"ok": True, "processed": processed})
@@ -3154,6 +3174,201 @@ async def success(
         "kaspi_status": kaspi_status,
         "kaspi_is_activated": "true" if kaspi_is_activated else "false",
     })
+
+
+# ---------------------------------------------------------------------------
+# АНАЛИТИКА: статистика покупок по роутерам
+# ---------------------------------------------------------------------------
+
+def _collect_router_stats() -> dict:
+    """
+    Агрегирует покупки из обеих таблиц (FreedomPay + Kaspi) по роутерам.
+    Возвращает структуру:
+      {
+        "generated_at": "...",
+        "routers": { "astana_01": { ... }, ... },
+        "totals": { ... }
+      }
+    """
+    now_kz = datetime.now(KZ_TZ)
+    today_str = now_kz.strftime("%Y-%m-%d")
+    week_ago_utc = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    month_ago_utc = (datetime.utcnow() - timedelta(days=30)).isoformat()
+
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        # --- FreedomPay: оплаченные заказы ---
+        fp_rows = conn.execute("""
+            SELECT
+                router_id,
+                amount,
+                COUNT(*) AS cnt,
+                SUM(amount) AS revenue,
+                SUM(CASE WHEN date(created_at, '+5 hours') = ? THEN 1 ELSE 0 END) AS today_cnt,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS week_cnt,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS month_cnt
+            FROM orders
+            WHERE status = 'PAID' AND router_id IS NOT NULL AND amount > 0
+            GROUP BY router_id, amount
+            ORDER BY router_id, amount
+        """, (today_str, week_ago_utc, month_ago_utc)).fetchall()
+
+        # --- Kaspi: активированные заказы ---
+        kaspi_rows = conn.execute("""
+            SELECT
+                router_id,
+                amount,
+                COUNT(*) AS cnt,
+                SUM(amount) AS revenue,
+                SUM(CASE WHEN date(COALESCE(activated_at, created_at), '+5 hours') = ? THEN 1 ELSE 0 END) AS today_cnt,
+                SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN 1 ELSE 0 END) AS week_cnt,
+                SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN 1 ELSE 0 END) AS month_cnt
+            FROM kaspi_orders
+            WHERE is_activated = 1 AND router_id IS NOT NULL AND amount > 0
+            GROUP BY router_id, amount
+            ORDER BY router_id, amount
+        """, (today_str, week_ago_utc, month_ago_utc)).fetchall()
+
+        # --- Trial: бесплатный доступ ---
+        trial_rows = conn.execute("""
+            SELECT
+                router_id,
+                COUNT(*) AS cnt,
+                SUM(CASE WHEN date(created_at, '+5 hours') = ? THEN 1 ELSE 0 END) AS today_cnt,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS week_cnt,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS month_cnt
+            FROM orders
+            WHERE status = 'TRIAL' AND router_id IS NOT NULL
+            GROUP BY router_id
+            ORDER BY router_id
+        """, (today_str, week_ago_utc, month_ago_utc)).fetchall()
+
+    finally:
+        conn.close()
+
+    # Собираем по роутерам
+    routers: dict = {}
+
+    def _ensure_router(rid: str) -> dict:
+        if rid not in routers:
+            routers[rid] = {
+                "freedompay": {"total": 0, "revenue": 0, "today": 0, "week": 0, "month": 0, "by_tariff": {}},
+                "kaspi":      {"total": 0, "revenue": 0, "today": 0, "week": 0, "month": 0, "by_tariff": {}},
+                "trial":      {"total": 0, "today": 0, "week": 0, "month": 0},
+            }
+        return routers[rid]
+
+    for r in fp_rows:
+        d = _ensure_router(r["router_id"])["freedompay"]
+        d["total"]   += r["cnt"]
+        d["revenue"] += r["revenue"]
+        d["today"]   += r["today_cnt"]
+        d["week"]    += r["week_cnt"]
+        d["month"]   += r["month_cnt"]
+        d["by_tariff"][str(r["amount"])] = {
+            "count":   r["cnt"],
+            "revenue": r["revenue"],
+            "today":   r["today_cnt"],
+            "week":    r["week_cnt"],
+            "month":   r["month_cnt"],
+        }
+
+    for r in kaspi_rows:
+        d = _ensure_router(r["router_id"])["kaspi"]
+        d["total"]   += r["cnt"]
+        d["revenue"] += r["revenue"]
+        d["today"]   += r["today_cnt"]
+        d["week"]    += r["week_cnt"]
+        d["month"]   += r["month_cnt"]
+        d["by_tariff"][str(r["amount"])] = {
+            "count":   r["cnt"],
+            "revenue": r["revenue"],
+            "today":   r["today_cnt"],
+            "week":    r["week_cnt"],
+            "month":   r["month_cnt"],
+        }
+
+    for r in trial_rows:
+        d = _ensure_router(r["router_id"])["trial"]
+        d["total"] += r["cnt"]
+        d["today"] += r["today_cnt"]
+        d["week"]  += r["week_cnt"]
+        d["month"] += r["month_cnt"]
+
+    # Вычисляем итоги по каждому роутеру
+    for rid, rd in routers.items():
+        fp = rd["freedompay"]
+        ka = rd["kaspi"]
+        tr = rd["trial"]
+        rd["summary"] = {
+            "total_paid":    fp["total"] + ka["total"],
+            "total_revenue": fp["revenue"] + ka["revenue"],
+            "total_trial":   tr["total"],
+            "today_paid":    fp["today"] + ka["today"],
+            "today_trial":   tr["today"],
+            "week_paid":     fp["week"] + ka["week"],
+            "month_paid":    fp["month"] + ka["month"],
+        }
+
+    # Глобальные итоги
+    all_fp_total    = sum(rd["freedompay"]["total"]   for rd in routers.values())
+    all_fp_revenue  = sum(rd["freedompay"]["revenue"] for rd in routers.values())
+    all_ka_total    = sum(rd["kaspi"]["total"]        for rd in routers.values())
+    all_ka_revenue  = sum(rd["kaspi"]["revenue"]      for rd in routers.values())
+    all_trial_total = sum(rd["trial"]["total"]        for rd in routers.values())
+    all_today       = sum(rd["summary"]["today_paid"] for rd in routers.values())
+    all_week        = sum(rd["summary"]["week_paid"]  for rd in routers.values())
+    all_month       = sum(rd["summary"]["month_paid"] for rd in routers.values())
+
+    # Сортируем роутеры по имени
+    routers = dict(sorted(routers.items()))
+
+    return {
+        "generated_at": now_kz.isoformat(),
+        "today_date":   today_str,
+        "routers":      routers,
+        "totals": {
+            "total_paid":       all_fp_total + all_ka_total,
+            "total_revenue":    all_fp_revenue + all_ka_revenue,
+            "freedompay_paid":  all_fp_total,
+            "freedompay_revenue": all_fp_revenue,
+            "kaspi_paid":       all_ka_total,
+            "kaspi_revenue":    all_ka_revenue,
+            "trial_total":      all_trial_total,
+            "today_paid":       all_today,
+            "week_paid":        all_week,
+            "month_paid":       all_month,
+        },
+    }
+
+
+@app.get("/api/admin/stats")
+async def admin_stats_json(request: Request):
+    """JSON-статистика покупок по роутерам. Требует X-Admin-Token."""
+    if not _has_admin_auth(request):
+        return utf8_json_response({"error": "Unauthorized"}, status_code=401)
+    data = await asyncio.to_thread(_collect_router_stats)
+    return utf8_json_response(data)
+
+
+@app.get("/admin/stats", response_class=HTMLResponse)
+async def admin_stats_page(request: Request):
+    """HTML-дашборд статистики по роутерам. Требует X-Admin-Token или ?token= в URL."""
+    # Поддерживаем token в query-параметре для удобного открытия в браузере
+    url_token = (request.query_params.get("token") or "").strip()
+    if url_token and ADMIN_TOKEN and hmac.compare_digest(url_token, ADMIN_TOKEN):
+        pass  # ok
+    elif not _has_admin_auth(request):
+        return HTMLResponse("<h2>401 Unauthorized — укажи ?token=ADMIN_TOKEN</h2>", status_code=401)
+
+    data = await asyncio.to_thread(_collect_router_stats)
+    tariffs_list = load_tariffs_config()
+    return templates.TemplateResponse(
+        "admin_stats.html",
+        {"request": request, "data": data, "tariffs": tariffs_list},
+    )
+
 
 if __name__ == "__main__":
     import uvicorn

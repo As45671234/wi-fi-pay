@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi-Pay — Статистика по роутерам</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f1f5f9;
+            color: #1e293b;
+            padding: 24px 16px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        h1 { font-size: 1.5rem; font-weight: 700; }
+        .meta { font-size: 0.78rem; color: #64748b; }
+
+        /* Итоговые карточки */
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 28px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px 18px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.07);
+        }
+        .card .label { font-size: 0.72rem; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+        .card .value { font-size: 1.6rem; font-weight: 700; }
+        .card .value.green  { color: #16a34a; }
+        .card .value.blue   { color: #2563eb; }
+        .card .value.orange { color: #ea580c; }
+        .card .value.violet { color: #7c3aed; }
+        .card .sub { font-size: 0.78rem; color: #94a3b8; margin-top: 4px; }
+
+        /* Таблица */
+        .table-wrap {
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.07);
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        thead th {
+            background: #f8fafc;
+            padding: 10px 12px;
+            text-align: right;
+            font-weight: 600;
+            font-size: 0.75rem;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            border-bottom: 1px solid #e2e8f0;
+            white-space: nowrap;
+        }
+        thead th:first-child { text-align: left; }
+        tbody tr { border-bottom: 1px solid #f1f5f9; transition: background .1s; }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:hover { background: #f8fafc; }
+        tbody td {
+            padding: 10px 12px;
+            text-align: right;
+            vertical-align: middle;
+        }
+        tbody td:first-child { text-align: left; font-weight: 600; }
+        tfoot td {
+            padding: 10px 12px;
+            text-align: right;
+            font-weight: 700;
+            background: #f1f5f9;
+            border-top: 2px solid #e2e8f0;
+            font-size: 0.88rem;
+        }
+        tfoot td:first-child { text-align: left; }
+
+        /* Бейджики */
+        .badge {
+            display: inline-block;
+            border-radius: 6px;
+            padding: 2px 7px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            margin: 1px;
+            white-space: nowrap;
+        }
+        .badge-fp  { background: #dbeafe; color: #1d4ed8; }
+        .badge-k   { background: #dcfce7; color: #15803d; }
+        .badge-tr  { background: #fef9c3; color: #92400e; }
+
+        .router-name { font-family: monospace; font-size: 0.88rem; }
+        .zero { color: #cbd5e1; }
+
+        /* Секция детализации по тарифам */
+        .tariff-detail { font-size: 0.72rem; color: #94a3b8; margin-top: 3px; }
+        .tariff-item { display: inline-block; margin-right: 6px; }
+
+        /* Переключатель периода */
+        .period-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .period-tabs button {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: all .15s;
+        }
+        .period-tabs button.active,
+        .period-tabs button:hover {
+            background: #2563eb;
+            color: #fff;
+            border-color: #2563eb;
+        }
+
+        @media (max-width: 600px) {
+            .summary-cards { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>📊 Статистика по роутерам</h1>
+        <div class="meta">Сформировано: {{ data.generated_at[:19].replace("T", " ") }} (UTC+5) &nbsp;·&nbsp; Дата: {{ data.today_date }}</div>
+    </div>
+    <div class="meta">
+        <a href="?token={{ request.query_params.get('token','') }}" style="color:#2563eb">↻ Обновить</a>
+    </div>
+</div>
+
+<!-- Итоговые карточки -->
+<div class="summary-cards">
+    <div class="card">
+        <div class="label">Всего оплат</div>
+        <div class="value blue">{{ data.totals.total_paid }}</div>
+        <div class="sub">FP: {{ data.totals.freedompay_paid }} / Kaspi: {{ data.totals.kaspi_paid }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Выручка всего</div>
+        <div class="value green">{{ "{:,}".format(data.totals.total_revenue) }} ₸</div>
+        <div class="sub">FP: {{ "{:,}".format(data.totals.freedompay_revenue) }} · K: {{ "{:,}".format(data.totals.kaspi_revenue) }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Сегодня</div>
+        <div class="value orange">{{ data.totals.today_paid }}</div>
+        <div class="sub">оплат</div>
+    </div>
+    <div class="card">
+        <div class="label">7 дней</div>
+        <div class="value violet">{{ data.totals.week_paid }}</div>
+        <div class="sub">оплат</div>
+    </div>
+    <div class="card">
+        <div class="label">30 дней</div>
+        <div class="value blue">{{ data.totals.month_paid }}</div>
+        <div class="sub">оплат</div>
+    </div>
+    <div class="card">
+        <div class="label">Трайалов всего</div>
+        <div class="value" style="color:#64748b">{{ data.totals.trial_total }}</div>
+        <div class="sub">бесплатно</div>
+    </div>
+</div>
+
+<!-- Переключатель периода -->
+<div class="period-tabs">
+    <button class="active" onclick="switchPeriod('total', this)">Всё время</button>
+    <button onclick="switchPeriod('today', this)">Сегодня</button>
+    <button onclick="switchPeriod('week', this)">7 дней</button>
+    <button onclick="switchPeriod('month', this)">30 дней</button>
+</div>
+
+<!-- Основная таблица -->
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>Роутер</th>
+            <th>Оплат</th>
+            <th>Выручка, ₸</th>
+            {% for t in tariffs %}
+            <th>{{ t.amount }} ₸<br><span style="font-weight:400;font-size:.7rem">{{ t.minutes }}мин</span></th>
+            {% endfor %}
+            <th>FreedomPay</th>
+            <th>Kaspi</th>
+            <th>Trial</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% set ns = namespace(
+            tot_paid=0, tot_rev=0,
+            tot_fp=0, tot_kp=0, tot_tr=0
+        ) %}
+        {% for rid, rd in data.routers.items() %}
+        {% set summary = rd.summary %}
+        {% set fp = rd.freedompay %}
+        {% set ka = rd.kaspi %}
+        {% set tr = rd.trial %}
+
+        {% set paid = summary.total_paid %}
+        {% set rev  = summary.total_revenue %}
+
+        {# период-зависимые значения задаём через data-атрибуты #}
+        <tr
+            data-total-paid="{{ paid }}"
+            data-total-rev="{{ rev }}"
+            data-today-paid="{{ summary.today_paid }}"
+            data-today-rev="0"
+            data-week-paid="{{ summary.week_paid }}"
+            data-week-rev="0"
+            data-month-paid="{{ summary.month_paid }}"
+            data-month-rev="0"
+        >
+            <td class="router-name">{{ rid }}</td>
+            <td class="paid-col {% if paid == 0 %}zero{% endif %}">{{ paid }}</td>
+            <td class="rev-col {% if rev == 0 %}zero{% endif %}">
+                {% if rev > 0 %}{{ "{:,}".format(rev) }}{% else %}—{% endif %}
+            </td>
+            {# Колонки по тарифам #}
+            {% for t in tariffs %}
+            {% set amount_key = t.amount | string %}
+            {% set fp_cnt = fp.by_tariff.get(amount_key, {}).get('count', 0) %}
+            {% set ka_cnt = ka.by_tariff.get(amount_key, {}).get('count', 0) %}
+            {% set tot_cnt = fp_cnt + ka_cnt %}
+            <td class="{% if tot_cnt == 0 %}zero{% endif %}">
+                {% if tot_cnt > 0 %}
+                    {{ tot_cnt }}
+                    {% if fp_cnt > 0 and ka_cnt > 0 %}
+                    <div class="tariff-detail">
+                        <span class="tariff-item">FP:{{ fp_cnt }}</span>
+                        <span class="tariff-item">K:{{ ka_cnt }}</span>
+                    </div>
+                    {% endif %}
+                {% else %}—{% endif %}
+            </td>
+            {% endfor %}
+            <td>
+                {% if fp.total > 0 %}
+                <span class="badge badge-fp">{{ fp.total }}</span>
+                {% else %}<span class="zero">—</span>{% endif %}
+            </td>
+            <td>
+                {% if ka.total > 0 %}
+                <span class="badge badge-k">{{ ka.total }}</span>
+                {% else %}<span class="zero">—</span>{% endif %}
+            </td>
+            <td>
+                {% if tr.total > 0 %}
+                <span class="badge badge-tr">{{ tr.total }}</span>
+                {% else %}<span class="zero">—</span>{% endif %}
+            </td>
+        </tr>
+        {% set ns.tot_paid = ns.tot_paid + paid %}
+        {% set ns.tot_rev  = ns.tot_rev  + rev  %}
+        {% set ns.tot_fp   = ns.tot_fp   + fp.total %}
+        {% set ns.tot_kp   = ns.tot_kp   + ka.total %}
+        {% set ns.tot_tr   = ns.tot_tr   + tr.total %}
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td>ИТОГО</td>
+            <td>{{ ns.tot_paid }}</td>
+            <td>{{ "{:,}".format(ns.tot_rev) }}</td>
+            {% for t in tariffs %}
+            {% set amount_key = t.amount | string %}
+            {% set fp_sum = data.routers.values() | sum(attribute='freedompay.by_tariff.' ~ amount_key ~ '.count') if false else 0 %}
+            <td>
+                {% set col_total = namespace(v=0) %}
+                {% for rd in data.routers.values() %}
+                    {% set ak = t.amount | string %}
+                    {% set col_total.v = col_total.v + rd.freedompay.by_tariff.get(ak, {}).get('count', 0) + rd.kaspi.by_tariff.get(ak, {}).get('count', 0) %}
+                {% endfor %}
+                {{ col_total.v if col_total.v > 0 else '—' }}
+            </td>
+            {% endfor %}
+            <td><span class="badge badge-fp">{{ ns.tot_fp }}</span></td>
+            <td><span class="badge badge-k">{{ ns.tot_kp }}</span></td>
+            <td><span class="badge badge-tr">{{ ns.tot_tr }}</span></td>
+        </tr>
+    </tfoot>
+</table>
+</div>
+
+<script>
+function switchPeriod(period, btn) {
+    document.querySelectorAll('.period-tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const rows = document.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        const paid = parseInt(row.dataset[period + 'Paid'] ?? row.dataset.totalPaid);
+        const rev  = parseInt(row.dataset[period + 'Rev']  ?? row.dataset.totalRev);
+        const paidCell = row.querySelector('.paid-col');
+        const revCell  = row.querySelector('.rev-col');
+        if (paidCell) {
+            paidCell.textContent = paid;
+            paidCell.className = 'paid-col' + (paid === 0 ? ' zero' : '');
+        }
+        if (revCell) {
+            revCell.textContent = rev > 0 ? rev.toLocaleString('ru-RU') : '—';
+            revCell.className = 'rev-col' + (rev === 0 ? ' zero' : '');
+        }
+    });
+}
+</script>
+</body>
+</html>
