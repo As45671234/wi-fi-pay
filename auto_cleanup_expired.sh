@@ -12,6 +12,12 @@
 
 set -e
 
+if [ -f ".env" ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 DRY_RUN=true
 if [ "$1" = "--apply" ]; then
     DRY_RUN=false
@@ -30,6 +36,7 @@ TIMESTAMP=$(date '+%s')
     
     python3 - "$DRY_RUN" << 'CLEANUP_SCRIPT'
 import json
+import os
 import sys
 import routeros_api
 from datetime import datetime
@@ -220,6 +227,14 @@ try:
 except Exception as e:
     print(f"❌ Ошибка чтения routers_config.json: {e}")
     sys.exit(1)
+
+router_user_env = (os.getenv('ROUTER_USER') or '').strip()
+router_pass_env = (os.getenv('ROUTER_PASS') or '').strip()
+for router in routers:
+    if router_user_env:
+        router['user'] = router_user_env
+    if router_pass_env:
+        router['pass'] = router_pass_env
 
 total_checked = 0
 total_deleted = 0

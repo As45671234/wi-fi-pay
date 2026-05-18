@@ -4,6 +4,12 @@
 
 set -e
 
+if [ -f ".env" ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║            WiFi-Pay Diagnostic Tool                       ║"
 echo "╚════════════════════════════════════════════════════════════╝"
@@ -100,6 +106,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 python3 << 'ROUTER_CHECK'
 import json
+import os
 import sys
 import routeros_api
 import time
@@ -111,6 +118,14 @@ try:
 except Exception as e:
     print(f"✗ Ошибка чтения routers_config.json: {e}")
     sys.exit(1)
+
+router_user_env = (os.getenv('ROUTER_USER') or '').strip()
+router_pass_env = (os.getenv('ROUTER_PASS') or '').strip()
+for router in routers:
+    if router_user_env:
+        router['user'] = router_user_env
+    if router_pass_env:
+        router['pass'] = router_pass_env
 
 connected = 0
 failed = 0

@@ -1,6 +1,12 @@
 #!/bin/bash
 # Показывает всех текущих клиентов и остаток времени для active/bypassed сессий
 
+if [ -f ".env" ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 python3 << 'PYTHON_SCRIPT'
 import os
 from datetime import datetime

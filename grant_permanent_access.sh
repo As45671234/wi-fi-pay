@@ -7,6 +7,12 @@
 
 set -e
 
+if [ -f ".env" ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 MAC="${1:-}"
 ROUTER_ID="${2:-}"
 
@@ -18,6 +24,7 @@ fi
 
 python3 - "$MAC" "$ROUTER_ID" << 'PYTHON_SCRIPT'
 import json
+import os
 import re
 import sys
 
@@ -32,6 +39,14 @@ if not re.fullmatch(r'([0-9A-F]{2}:){5}[0-9A-F]{2}', mac):
 
 with open('routers_config.json', 'r', encoding='utf-8-sig') as f:
     routers = json.load(f)
+
+router_user_env = (os.getenv('ROUTER_USER') or '').strip()
+router_pass_env = (os.getenv('ROUTER_PASS') or '').strip()
+for router in routers:
+    if router_user_env:
+        router['user'] = router_user_env
+    if router_pass_env:
+        router['pass'] = router_pass_env
 
 router = next((r for r in routers if r.get('id') == router_id), None)
 if not router:

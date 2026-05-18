@@ -1,6 +1,12 @@
 #!/bin/bash
 # Скрипт для проверки статуса устройства
 
+if [ -f ".env" ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 MAC="${1:-22:1D:C8:99:FE:B0}"
 DB_PATH="gateway.db"
 

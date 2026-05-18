@@ -6,6 +6,12 @@
 
 set -e
 
+if [ -f ".env" ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 TARGET_ROUTER_ID="${1:-}"
 
 echo "╔════════════════════════════════════════════════════════════╗"
@@ -18,6 +24,7 @@ echo "╚═══════════════════════�
 
 python3 - "$TARGET_ROUTER_ID" << 'CLEANUP_SCRIPT'
 import json
+import os
 import sys
 import routeros_api
 import time
@@ -31,6 +38,14 @@ try:
 except Exception as e:
     print(f"❌ Ошибка чтения routers_config.json: {e}")
     sys.exit(1)
+
+router_user_env = (os.getenv('ROUTER_USER') or '').strip()
+router_pass_env = (os.getenv('ROUTER_PASS') or '').strip()
+for router in routers:
+    if router_user_env:
+        router['user'] = router_user_env
+    if router_pass_env:
+        router['pass'] = router_pass_env
 
 if target_router_id:
     routers = [r for r in routers if r.get('id') == target_router_id]
