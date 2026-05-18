@@ -3206,13 +3206,15 @@ def _collect_router_stats() -> dict:
                 COUNT(*) AS cnt,
                 SUM(amount) AS revenue,
                 SUM(CASE WHEN date(created_at, '+5 hours') = ? THEN 1 ELSE 0 END) AS today_cnt,
+                SUM(CASE WHEN date(created_at, '+5 hours') = ? THEN amount ELSE 0 END) AS today_revenue,
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS week_cnt,
+                SUM(CASE WHEN created_at >= ? THEN amount ELSE 0 END) AS week_revenue,
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS month_cnt
             FROM orders
             WHERE status = 'PAID' AND router_id IS NOT NULL AND amount > 0
             GROUP BY router_id, amount
             ORDER BY router_id, amount
-        """, (today_str, week_ago_utc, month_ago_utc)).fetchall()
+        """, (today_str, today_str, week_ago_utc, week_ago_utc, month_ago_utc)).fetchall()
 
         # --- Kaspi: активированные заказы ---
         kaspi_rows = conn.execute("""
@@ -3222,13 +3224,15 @@ def _collect_router_stats() -> dict:
                 COUNT(*) AS cnt,
                 SUM(amount) AS revenue,
                 SUM(CASE WHEN date(COALESCE(activated_at, created_at), '+5 hours') = ? THEN 1 ELSE 0 END) AS today_cnt,
+                SUM(CASE WHEN date(COALESCE(activated_at, created_at), '+5 hours') = ? THEN amount ELSE 0 END) AS today_revenue,
                 SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN 1 ELSE 0 END) AS week_cnt,
+                SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN amount ELSE 0 END) AS week_revenue,
                 SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN 1 ELSE 0 END) AS month_cnt
             FROM kaspi_orders
             WHERE is_activated = 1 AND router_id IS NOT NULL AND amount > 0
             GROUP BY router_id, amount
             ORDER BY router_id, amount
-        """, (today_str, week_ago_utc, month_ago_utc)).fetchall()
+        """, (today_str, today_str, week_ago_utc, week_ago_utc, month_ago_utc)).fetchall()
 
         # --- Trial: бесплатный доступ ---
         trial_rows = conn.execute("""
@@ -3306,9 +3310,12 @@ def _collect_router_stats() -> dict:
             "total_revenue": fp["revenue"] + ka["revenue"],
             "total_trial":   tr["total"],
             "today_paid":    fp["today"] + ka["today"],
+            "today_revenue": fp["today_revenue"] + ka["today_revenue"],
             "today_trial":   tr["today"],
             "week_paid":     fp["week"] + ka["week"],
+            "week_revenue":  fp["week_revenue"] + ka["week_revenue"],
             "month_paid":    fp["month"] + ka["month"],
+            "month_revenue": fp["month_revenue"] + ka["month_revenue"],
         }
 
     # Глобальные итоги
@@ -3337,8 +3344,11 @@ def _collect_router_stats() -> dict:
             "kaspi_revenue":    all_ka_revenue,
             "trial_total":      all_trial_total,
             "today_paid":       all_today,
+            "today_revenue":    sum(rd["summary"]["today_revenue"] for rd in routers.values()),
             "week_paid":        all_week,
+            "week_revenue":     sum(rd["summary"]["week_revenue"] for rd in routers.values()),
             "month_paid":       all_month,
+            "month_revenue":    sum(rd["summary"]["month_revenue"] for rd in routers.values()),
         },
     }
 

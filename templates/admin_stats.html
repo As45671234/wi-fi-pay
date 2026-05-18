@@ -226,11 +226,11 @@
             data-total-paid="{{ paid }}"
             data-total-rev="{{ rev }}"
             data-today-paid="{{ summary.today_paid }}"
-            data-today-rev="0"
+            data-today-rev="{{ summary.today_revenue }}"
             data-week-paid="{{ summary.week_paid }}"
-            data-week-rev="0"
+            data-week-rev="{{ summary.week_revenue }}"
             data-month-paid="{{ summary.month_paid }}"
-            data-month-rev="0"
+            data-month-rev="{{ summary.month_revenue }}"
         >
             <td class="router-name">{{ rid }}</td>
             <td class="paid-col {% if paid == 0 %}zero{% endif %}">{{ paid }}</td>
