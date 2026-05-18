@@ -8,13 +8,21 @@ if [ -f ".env" ]; then
 fi
 
 python3 << 'PYTHON_SCRIPT'
+import json
 import os
 from datetime import datetime
 
 import routeros_api
 
 router_ips_raw = os.getenv('ROUTER_IPS', os.getenv('ROUTER_IP', '10.0.0.2'))
-ROUTER_IPS = [ip.strip() for ip in router_ips_raw.split(',') if ip.strip()]
+
+if router_ips_raw.strip().lower() == '-all':
+    with open('routers_config.json', encoding='utf-8-sig') as f:
+        routers = json.load(f)
+    ROUTER_IPS = [router.get('ip', '').strip() for router in routers if router.get('ip')]
+else:
+    ROUTER_IPS = [ip.strip() for ip in router_ips_raw.split(',') if ip.strip()]
+
 ROUTER_USER = os.getenv('ROUTER_USER', 'admin')
 ROUTER_PASS = os.getenv('ROUTER_PASS', 'kaspiwifiadmin2026')
 
