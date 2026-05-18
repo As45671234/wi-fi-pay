@@ -78,7 +78,7 @@ ROUTER_USER_ENV = os.getenv("ROUTER_USER", "").strip()
 ROUTER_PASS_ENV = os.getenv("ROUTER_PASS", "").strip()
 
 if os.path.exists(ROUTERS_CONFIG_PATH):
-    with open(ROUTERS_CONFIG_PATH, encoding="utf-8") as f:
+    with open(ROUTERS_CONFIG_PATH, encoding="utf-8-sig") as f:
         routers_list = json.load(f)
     ROUTERS_CONFIG = {router["id"]: router for router in routers_list}
     # Применяем env-переопределения: .env имеет приоритет над JSON
