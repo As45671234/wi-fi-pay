@@ -161,50 +161,9 @@
         var t0 = Date.now();
         logClient('submit_clicked', 0, isIOS ? 'ios' : 'non-ios');
 
-        // iOS captive: сначала дожидаемся prepare_access, потом делаем явный переход.
-        if (isIOS) {
-            event.preventDefault();
-            btn.disabled = true;
-            overlay.classList.add('active');
-            if (loadingSub) {
-                loadingSub.textContent = 'Подготавливаем доступ...';
-            }
-
-            fetch('/api/prepare_access', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({mac: macAddress, router_id: routerId, cid: cid})
-            })
-            .then(function(response) { return response.json(); })
-            .then(function(data) {
-                if (data && data.ok) {
-                    logClient('prepare_ok', Date.now() - t0, 'ios_nav_tariffs_same_origin');
-                    var relTariffUrl = '/tariffs?mac=' + encodeURIComponent(macAddress) + '&router_id=' + encodeURIComponent(routerId) + '&cid=' + encodeURIComponent(cid);
-                    var absTariffUrl = 'https://wifi-pay.kz' + relTariffUrl;
-                    window.location.assign(relTariffUrl);
-
-                    // iOS captive иногда задерживает переход. Если через 3с мы всё ещё здесь — fallback.
-                    setTimeout(function() {
-                        if (document.visibilityState === 'visible') {
-                            logClient('nav_fallback_abs', Date.now() - t0, 'ios_still_visible_after_3s');
-                            window.location.assign(absTariffUrl);
-                        }
-                    }, 3000);
-                    return;
-                }
-                throw new Error((data && data.error) ? data.error : 'prepare_access failed');
-            })
-            .catch(function() {
-                logClient('prepare_fail', Date.now() - t0, 'api_prepare_access_error');
-                btn.disabled = false;
-                overlay.classList.remove('active');
-                if (loadingSub) {
-                    loadingSub.textContent = 'Ошибка подготовки. Повторите.';
-                }
-            });
-            return;
-        }
-
+        // iOS и все остальные: стандартный форм-сабмит на /prepare_and_tariffs.
+        // Сервер создаёт PAY_WINDOW синхронно, потом делает 303 редирект на /tariffs.
+        // Это тот же надёжный путь что и у Android (только без intent URL).
         btn.disabled = true;
         overlay.classList.add('active');
 
