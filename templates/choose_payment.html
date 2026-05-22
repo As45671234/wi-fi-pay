@@ -233,6 +233,17 @@ const mac = "{{ mac }}";
 const routerId = "{{ router_id }}";
 const cid = "{{ cid }}";
 
+// Сразу при открытии страницы обновляем/создаём PAY_WINDOW (3 мин bypass на роутере).
+// wifi-pay.kz всегда доступен с хотспота, поэтому fetch работает даже без интернета.
+(function refreshPayWindow() {
+    if (!mac || !routerId) return;
+    fetch('/api/prepare_access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mac: mac, router_id: routerId, cid: cid })
+    }).catch(function() {});  // fire-and-forget
+})();
+
 const kaspiBtn = document.getElementById('kaspiBtn');
 if (kaspiBtn) {
     kaspiBtn.addEventListener('click', async function () {
