@@ -30,23 +30,28 @@ router = APIRouter()
 
 # ── Helper: PAY_WINDOW ─────────────────────────────────────────────────────
 
-async def _create_pay_window(mac: str, router_id: str, cid: str) -> tuple[bool, object]:
-    """Открывает PAY_WINDOW на MikroTik и записывает строку в orders."""
+async def _create_pay_window(mac: str, router_id: str, cid: str, force: bool = False) -> tuple[bool, object]:
+    """Открывает PAY_WINDOW на MikroTik и записывает строку в orders.
+    force=True — всегда идём на роутер (используется из choose_payment, чтобы
+    гарантировать свежий bypass перед оплатой).
+    """
     # ── Fast path: уже есть живой PAY_WINDOW в БД — пропускаем MikroTik ──
-    conn = get_db()
-    try:
-        existing = conn.execute(
-            "SELECT id FROM orders WHERE mac_address=? AND router_id=?"
-            " AND status='PAY_WINDOW' AND expires_at > datetime('now')"
-            " ORDER BY id DESC LIMIT 1",
-            (mac, router_id),
-        ).fetchone()
-    finally:
-        conn.close()
-    if existing:
-        logger.info("[PAY_WINDOW] cache hit cid=%s mac=%s*** router=%s",
-                    cid, mac[:8], router_id)
-        return True, None
+    # Пропускаем cache только если force=False И осталось >90 секунд.
+    if not force:
+        conn = get_db()
+        try:
+            existing = conn.execute(
+                "SELECT id FROM orders WHERE mac_address=? AND router_id=?"
+                " AND status='PAY_WINDOW' AND expires_at > datetime('now', '+90 seconds')"
+                " ORDER BY id DESC LIMIT 1",
+                (mac, router_id),
+            ).fetchone()
+        finally:
+            conn.close()
+        if existing:
+            logger.info("[PAY_WINDOW] cache hit cid=%s mac=%s*** router=%s",
+                        cid, mac[:8], router_id)
+            return True, None
 
     # ── Вызов MikroTik через выделенный пул потоков (20 потоков) ──────────
     loop = asyncio.get_running_loop()
@@ -160,15 +165,16 @@ async def prepare_access(request: Request):
     mac = data.get("mac", "")
     router_id = data.get("router_id", "astana_01")
     cid = (data.get("cid") or "-")[:24]
+    force = bool(data.get("force", False))
 
-    logger.info(f"[prepare_access] START cid={cid} mac={mac[:8]}*** router={router_id}")
+    logger.info(f"[prepare_access] START cid={cid} force={force} mac={mac[:8]}*** router={router_id}")
 
     if not _is_valid_mac(mac or ""):
         return utf8_json_response({"ok": False, "error": "Некорректный MAC"}, status_code=400)
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"ok": False, "error": "Неизвестный роутер"}, status_code=400)
 
-    ok, err = await _create_pay_window(mac, router_id, cid)
+    ok, err = await _create_pay_window(mac, router_id, cid, force=force)
     if not ok:
         return err
     logger.info("[prepare_access] DONE cid=%s in %.0fms ✓ mac=%s*** router=%s",

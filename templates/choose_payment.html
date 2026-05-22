@@ -240,7 +240,7 @@ const cid = "{{ cid }}";
     fetch('/api/prepare_access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac: mac, router_id: routerId, cid: cid })
+        body: JSON.stringify({ mac: mac, router_id: routerId, cid: cid, force: true })
     }).catch(function() {});  // fire-and-forget
 })();
 
