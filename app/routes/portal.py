@@ -242,7 +242,7 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         })
 
     t_start = time.monotonic()
-    ok, err = await _create_pay_window(mac, router_id, cid)
+    ok, err = await _create_pay_window(mac, router_id, cid, force=True)
     if not ok:
         return err
 
