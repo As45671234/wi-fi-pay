@@ -109,7 +109,7 @@
         #pay-btn-area { display: none; border-top: 1px solid #f1f5f9; padding-top: 1.5rem; margin-top: 1rem; animation: fadeIn 0.3s ease; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
-        .btn { background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); }
+        .btn { display: block; box-sizing: border-box; background-color: #1c75ff; color: white; border: none; width: 100%; padding: 1.1rem; border-radius: 1.2rem; font-size: 1rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(28, 117, 255, 0.25); text-decoration: none; text-align: center; }
         .btn:disabled { background-color: #94a3b8; cursor: not-allowed; }
         
         .mac-id { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2rem; }
@@ -134,7 +134,7 @@
         <div class="tariff-list" id="tariff-list"></div>
 
         <div id="pay-btn-area">
-            <a class="btn" id="main-pay-btn" href="#" target="_blank" rel="noopener noreferrer" onclick="return handlePayClick(event)" style="display: none; text-decoration: none; text-align: center;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</a>
+            <a class="btn" id="main-pay-btn" href="#" target="_blank" rel="noopener noreferrer" onclick="return handlePayClick(event)" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</a>
         </div>
         
         <div class="mac-id">ID: <span id="mac-value">-</span> | ROUTER: <span id="router-value">-</span></div>

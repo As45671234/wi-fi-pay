@@ -242,9 +242,16 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         })
 
     t_start = time.monotonic()
-    ok, err = await _create_pay_window(mac, router_id, cid, force=True)
-    if not ok:
-        return err
+    # Мягкий таймаут 3с: если роутер отвечает быстро — ждём полного результата;
+    # если медленный — редиректим через 3с, фоновый поток всё равно создаст биндинг,
+    # а /start_payment добавит force=True перед оплатой как страховку.
+    _pw_task = asyncio.ensure_future(_create_pay_window(mac, router_id, cid, force=True))
+    try:
+        ok, err = await asyncio.wait_for(asyncio.shield(_pw_task), timeout=3.0)
+        if not ok:
+            return err
+    except asyncio.TimeoutError:
+        logger.warning("[prepare_and_tariffs] PAY_WINDOW >3s, redirect без ожидания cid=%s mac=%s***", cid, mac[:8])
 
     total_ms = (time.monotonic() - t_start) * 1000
     user_agent = (request.headers.get("user-agent") or "")
