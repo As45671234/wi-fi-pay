@@ -11,6 +11,7 @@ import secrets
 import json
 import socket
 import threading
+from queue import Queue, Empty
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode, unquote
@@ -199,6 +200,7 @@ def get_tariff_runtime_state() -> tuple[list[dict], dict[int, int], dict[int, st
 MERCHANT_ID = (os.getenv("MERCHANT_ID") or os.getenv("FREEDOMPAY_MERCHANT_ID") or "").strip()
 SECRET_KEY = (os.getenv("SECRET_KEY") or os.getenv("FREEDOMPAY_SECRET_KEY") or "").strip()
 PAY_URL = (os.getenv("PAY_URL") or os.getenv("FREEDOMPAY_API_URL") or "https://api.freedompay.kz/payment.php").strip()
+BASE_URL = os.getenv("BASE_URL", "https://wifi-pay.kz").strip().rstrip("/")
 
 if not MERCHANT_ID:
     logger.critical("MERCHANT_ID не задан в .env! Платежи FreedomPay не будут работать.")
@@ -272,12 +274,59 @@ else:
 # --- БАЗА ДАННЫХ ---
 DB_PATH = os.path.join(BASE_DIR, 'gateway.db')
 
-def get_db() -> sqlite3.Connection:
-    """Возвращает connection с WAL mode и timeout для безопасной работы с несколькими workers."""
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+# ---------------------------------------------------------------------------
+# Пул соединений SQLite — переиспользует открытые соединения вместо
+# open/close на каждый запрос.  Прозрачно для всего существующего кода:
+# conn.close() возвращает соединение в пул, а не закрывает файл.
+# ---------------------------------------------------------------------------
+_DB_POOL_MAX = 8
+_db_pool: "Queue[sqlite3.Connection]" = Queue(maxsize=_DB_POOL_MAX)
+
+
+class _PooledConn:
+    """Прозрачный прокси sqlite3.Connection: при close() возвращается в пул."""
+    __slots__ = ("_raw",)
+
+    def __init__(self, raw: sqlite3.Connection) -> None:
+        object.__setattr__(self, "_raw", raw)
+
+    def __getattr__(self, name: str):
+        return getattr(object.__getattribute__(self, "_raw"), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        if name == "_raw":
+            object.__setattr__(self, name, value)
+        else:
+            setattr(object.__getattribute__(self, "_raw"), name, value)
+
+    def close(self) -> None:
+        raw = object.__getattribute__(self, "_raw")
+        raw.row_factory = None  # сбросить row_factory перед возвратом в пул
+        try:
+            raw.rollback()      # откатить незакоммиченные транзакции
+        except Exception:
+            pass
+        try:
+            _db_pool.put_nowait(raw)
+        except Exception:
+            raw.close()
+
+
+def _create_raw_db_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+def get_db():
+    """Возвращает соединение из пула (или создаёт новое).
+    Caller обязан вызвать conn.close() — соединение вернётся в пул."""
+    try:
+        raw = _db_pool.get_nowait()
+    except Empty:
+        raw = _create_raw_db_conn()
+    return _PooledConn(raw)
 
 def init_db():
     conn = get_db()
@@ -302,6 +351,11 @@ def init_db():
         conn.execute("ALTER TABLE orders ADD COLUMN payment_order_id TEXT")
     if 'expires_at' not in columns:
         conn.execute("ALTER TABLE orders ADD COLUMN expires_at TIMESTAMP")
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_mac_router "
+        "ON orders(mac_address, router_id, status, created_at DESC)"
+    )
 
     conn.execute('''
         CREATE TABLE IF NOT EXISTS kaspi_orders (
@@ -515,7 +569,7 @@ QR_FALLBACK_POLL_TIMEOUT_AUTO_SECONDS = max(
 def _make_device_cookie(mac: str, router_id: str) -> str:
     """Создать подписанную cookie: base64(mac|router_id).HMAC."""
     payload = f"{mac}|{router_id}"
-    sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
     encoded = base64.urlsafe_b64encode(payload.encode()).decode()
     return f"{encoded}.{sig}"
 
@@ -530,7 +584,7 @@ def _parse_device_cookie(cookie_value: str) -> tuple[str, str] | None:
             return None
         encoded, sig = parts
         payload = base64.urlsafe_b64decode(encoded.encode()).decode()
-        expected_sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+        expected_sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
         if not hmac.compare_digest(sig, expected_sig):
             return None
         mac, router_id = payload.split("|", 1)
@@ -614,8 +668,8 @@ def _pick_qr_mac_fallback(router_id: str, busy_macs: set[str]) -> tuple[str | No
             password=config['pass'],
             port=int(config.get('port', 8728)),
             plaintext_login=True,
+            socket_timeout=1.0,
         )
-        api = connection.get_api()
         host_res = api.get_resource('/ip/hotspot/host')
         rows = host_res.call('print')
     except Exception:
@@ -1446,6 +1500,7 @@ def check_router_hotspot_enabled(config: dict) -> bool:
             password=config['pass'],
             port=config.get('port', 8728),
             plaintext_login=True,
+            socket_timeout=5.0,
         )
         api = connection.get_api()
         
@@ -1641,7 +1696,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
         logger.error(f"❌ Неизвестный router_id: {router_id}")
         return False
 
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+    if not _is_valid_mac(mac or ""):
         logger.error(f"❌ Некорректный MAC: {mac}")
         return False
 
@@ -1664,6 +1719,7 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 password=config['pass'],
                 port=api_port,
                 plaintext_login=True,
+                socket_timeout=8.0,
             )
             api = connection.get_api()
             logger.info(f"[MK] connect {router_id}: {(time.monotonic()-t0)*1000:.0f}ms (attempt {attempt})")
@@ -1793,7 +1849,7 @@ def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: s
     minutes = amount_to_minutes.get(amount, 60)
     cid = (cid or make_cid())[:24]
     success_url = (
-        f"https://wifi-pay.kz/success"
+        f"{BASE_URL}/success"
         f"?mac={mac}"
         f"&router_id={router_id}"
         f"&minutes={minutes}"
@@ -1804,7 +1860,7 @@ def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: s
         'pg_merchant_id': MERCHANT_ID, 'pg_amount': str(amount), 'pg_currency': 'KZT',
         'pg_description': f"Wi-Fi {mac}", 'pg_order_id': payment_order_id,
         'pg_salt': 'salt', 'pg_param1': mac, 'pg_param2': router_id, 'pg_param3': cid,
-        'pg_result_url': 'https://wifi-pay.kz/payment_result',
+        'pg_result_url': f'{BASE_URL}/payment_result',
         'pg_success_url': success_url,
     }
     params['pg_sig'] = get_signature("payment.php", params, SECRET_KEY)
@@ -1813,7 +1869,7 @@ def build_payment_url(amount: int, mac: str, router_id: str, payment_order_id: s
 @app.get("/session_status")
 async def session_status(mac: str, router_id: str = "astana_01"):
     """Возвращает статус сессии по MAC. Используется клиентом для поллинга."""
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+    if not _is_valid_mac(mac or ""):
         return utf8_json_response({"active": False, "expires_in": -1, "status": "NONE"})
     conn = get_db()
     try:
@@ -1848,6 +1904,42 @@ async def session_status(mac: str, router_id: str = "astana_01"):
     except Exception:
         return utf8_json_response({"active": False, "expires_in": -1, "status": status})
 
+
+async def _create_pay_window(mac: str, router_id: str, cid: str) -> tuple[bool, object]:
+    """Открывает PAY_WINDOW на MikroTik и записывает строку в orders.
+    Возвращает (True, None) при успехе или (False, error_response) при ошибке."""
+    try:
+        ok = await asyncio.wait_for(
+            asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
+            timeout=PREPARE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.error("[PAY_WINDOW] TIMEOUT cid=%s >%ss mac=%s*** router=%s",
+                     cid, PREPARE_TIMEOUT_SECONDS, mac[:8], router_id)
+        return False, utf8_json_response(
+            {"ok": False, "error": "Роутер отвечает слишком долго. Повторите через пару секунд."},
+            status_code=504,
+        )
+    if not ok:
+        logger.error("[PAY_WINDOW] FAIL cid=%s mac=%s*** router=%s", cid, mac[:8], router_id)
+        return False, utf8_json_response(
+            {"ok": False, "error": "Не удалось подготовить доступ. Повторите попытку."},
+            status_code=502,
+        )
+    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at)"
+            " VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
+            (mac, router_id, expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return True, None
+
+
 @app.post("/api/prepare_access")
 async def prepare_access(request: Request):
     """Создаёт PAY_WINDOW синхронно — welcome.html ждёт завершения через AJAX."""
@@ -1859,46 +1951,18 @@ async def prepare_access(request: Request):
 
     logger.info(f"[prepare_access] START cid={cid} mac={mac[:8]}*** router={router_id}")
 
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+    if not _is_valid_mac(mac or ""):
         return utf8_json_response({"ok": False, "error": "Некорректный MAC"}, status_code=400)
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"ok": False, "error": "Неизвестный роутер"}, status_code=400)
 
     t_mk = time.monotonic()
-    try:
-        ok = await asyncio.wait_for(
-            asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
-            timeout=PREPARE_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        logger.error(f"[prepare_access] TIMEOUT cid={cid} >{PREPARE_TIMEOUT_SECONDS}s для {mac[:8]}*** ({router_id})")
-        return utf8_json_response(
-            {"ok": False, "error": "Роутер отвечает слишком долго. Повторите через пару секунд."},
-            status_code=504,
-        )
-
+    ok, err = await _create_pay_window(mac, router_id, cid)
     if not ok:
-        logger.error(f"[prepare_access] PAY_WINDOW FAIL cid={cid} для {mac[:8]}*** ({router_id})")
-        return utf8_json_response(
-            {"ok": False, "error": "Не удалось подготовить доступ. Повторите попытку."},
-            status_code=502,
-        )
-
-    t_db = time.monotonic()
-    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at) VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
-            (mac, router_id, expires_at),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    logger.info(f"[prepare_access] DB INSERT cid={cid}: {(time.monotonic()-t_db)*1000:.0f}ms")
-
-    logger.info(f"[prepare_access] DONE cid={cid} MikroTik: {(time.monotonic()-t_mk)*1000:.0f}ms, total: {(time.monotonic()-t_start)*1000:.0f}ms, {'✓' if ok else '✗'} для {mac[:8]}***")
-    return utf8_json_response({"ok": ok})
+        return err
+    logger.info("[prepare_access] DONE cid=%s in %.0fms ✓ mac=%s*** router=%s",
+                cid, (time.monotonic() - t_start) * 1000, mac[:8], router_id)
+    return utf8_json_response({"ok": True})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1988,7 +2052,7 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
     cid = (cid or make_cid())[:24]
     logger.info(f"[prepare_and_tariffs] START cid={cid} mac={mac[:8]}*** router={router_id}")
 
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+    if not _is_valid_mac(mac or ""):
         return templates.TemplateResponse("welcome.html", {
             "request": request,
             "mac": mac,
@@ -2006,35 +2070,9 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         })
 
     t_start = time.monotonic()
-    try:
-        ok = await asyncio.wait_for(
-            asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
-            timeout=PREPARE_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        logger.error(f"[prepare_and_tariffs] TIMEOUT cid={cid} >{PREPARE_TIMEOUT_SECONDS}s для {mac[:8]}*** ({router_id})")
-        return utf8_json_response(
-            {"ok": False, "error": "Роутер отвечает слишком долго. Повторите через пару секунд."},
-            status_code=504,
-        )
-
+    ok, err = await _create_pay_window(mac, router_id, cid)
     if not ok:
-        logger.error(f"[prepare_and_tariffs] PAY_WINDOW FAIL cid={cid} для {mac[:8]}*** ({router_id})")
-        return utf8_json_response(
-            {"ok": False, "error": "Не удалось подготовить доступ. Повторите попытку."},
-            status_code=502,
-        )
-
-    expires_at = (datetime.utcnow() + timedelta(seconds=180)).isoformat()
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id, expires_at) VALUES (?, 0, 'PAY_WINDOW', ?, ?)",
-            (mac, router_id, expires_at),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        return err
 
     total_ms = (time.monotonic() - t_start) * 1000
     user_agent = (request.headers.get("user-agent") or "")
@@ -2170,7 +2208,7 @@ async def debug_router_status(request: Request, mac: str = "00:00:00:00:00:00", 
     if not config:
         return utf8_json_response({"error": f"Неизвестный router_id: {router_id}"}, status_code=400)
     
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
+    if not _is_valid_mac(mac or ""):
         return utf8_json_response({"error": f"Некорректный MAC: {mac}"}, status_code=400)
     
     debug_info = {
@@ -2286,7 +2324,7 @@ async def sign_qr_router_link(router_id: str):
             "router_id": router_id,
             "ts": ts,
             "sig": sig,
-            "url": f"https://wifi-pay.kz/q?r={router_id}&ts={ts}&sig={sig}",
+            "url": f"{BASE_URL}/q?r={router_id}&ts={ts}&sig={sig}",
         }
     )
 
@@ -2512,7 +2550,7 @@ async def choose_payment(
     if amount not in allowed_amounts:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
 
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+    if not _is_valid_mac(mac or ""):
         return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
 
     if router_id not in ROUTERS_CONFIG:
@@ -2665,12 +2703,12 @@ async def kaspi_check_pay_docs():
     return utf8_json_response(
         {
             "service": "WiFi Pay",
-            "base_url": "https://wifi-pay.kz",
+            "base_url": BASE_URL,
             "protocol": "HTTPS",
             "method": "POST",
             "content_type": "application/json; charset=UTF-8",
             "check": {
-                "url": "https://wifi-pay.kz/api/kaspi/check",
+                "url": f"{BASE_URL}/api/kaspi/check",
                 "request_example": {
                     "request_id": "CHK-0001",
                     "contract_number": "A13AABBCCDDEEFF1234567890ABCD",
@@ -2693,7 +2731,7 @@ async def kaspi_check_pay_docs():
                 },
             },
             "pay": {
-                "url": "https://wifi-pay.kz/api/kaspi/pay",
+                "url": f"{BASE_URL}/api/kaspi/pay",
                 "request_example": {
                     "request_id": "PAY-0001",
                     "transaction_id": "KASPI-TXN-987654321",
@@ -2957,7 +2995,7 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     if amount not in allowed_amounts:
         return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
     
-    if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac or ""):
+    if not _is_valid_mac(mac or ""):
         return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
 
     if router_id not in ROUTERS_CONFIG:
@@ -2986,7 +3024,7 @@ async def activate_welcome(request: Request, mac: str, router_id: str = "astana_
     PAY_WINDOW теперь создаётся через /api/prepare_access из welcome.html.
     Этот endpoint только редиректит на /tariffs (без создания MikroTik доступа).
     """
-    if not mac or not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
+    if not _is_valid_mac(mac or ""):
         logger.warning(f"[activate_welcome] Некорректный MAC: {mac}")
         return utf8_json_response({"error": "Некорректный MAC"}, status_code=400)
     if router_id not in ROUTERS_CONFIG:
@@ -3180,9 +3218,15 @@ async def success(
 # АНАЛИТИКА: статистика покупок по роутерам
 # ---------------------------------------------------------------------------
 
+_stats_cache: "dict | None" = None
+_stats_cache_ts: float = 0.0
+_STATS_CACHE_TTL = 60.0  # секунд
+
+
 def _collect_router_stats() -> dict:
     """
     Агрегирует покупки из обеих таблиц (FreedomPay + Kaspi) по роутерам.
+    Результат кешируется на 60 секунд.
     Возвращает структуру:
       {
         "generated_at": "...",
@@ -3190,6 +3234,10 @@ def _collect_router_stats() -> dict:
         "totals": { ... }
       }
     """
+    global _stats_cache, _stats_cache_ts
+    _mono = time.monotonic()
+    if _stats_cache is not None and (_mono - _stats_cache_ts) < _STATS_CACHE_TTL:
+        return _stats_cache
     now_kz = datetime.now(KZ_TZ)
     today_str = now_kz.strftime("%Y-%m-%d")
     week_ago_utc = (datetime.utcnow() - timedelta(days=7)).isoformat()
@@ -3339,7 +3387,7 @@ def _collect_router_stats() -> dict:
     # Сортируем роутеры по имени
     routers = dict(sorted(routers.items()))
 
-    return {
+    _result = {
         "generated_at": now_kz.isoformat(),
         "today_date":   today_str,
         "routers":      routers,
@@ -3359,6 +3407,9 @@ def _collect_router_stats() -> dict:
             "month_revenue":    sum(rd["summary"]["month_revenue"] for rd in routers.values()),
         },
     }
+    _stats_cache = _result
+    _stats_cache_ts = time.monotonic()
+    return _result
 
 
 @app.get("/api/admin/stats")
