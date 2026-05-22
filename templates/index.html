@@ -342,6 +342,18 @@
         const t0 = Date.now();
         logClient('pay_clicked', 0, 'amount=' + selectedAmt);
 
+        // iOS: CNA идёт на /open_payment (HTTP, без target=_blank).
+        // Сервер создаёт PAY_WINDOW (~1с) и возвращает 302 на HTTPS /choose_payment.
+        // iOS CNA не умеет HTTPS → открывает Safari и CNA закрывается чисто.
+        // PAY_WINDOW создаётся здесь, а не на этапе tariffs — CNA не зависает.
+        if (isIOS) {
+            event.preventDefault();
+            const payPath = `/open_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+            logClient('pay_nav', Date.now() - t0, 'ios_open_payment');
+            window.location.href = payPath;
+            return false;
+        }
+
         // Android: перехватываем клик и делаем intent URL для Chrome.
         if (isAndroid) {
             event.preventDefault();
