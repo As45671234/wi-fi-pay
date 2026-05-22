@@ -238,20 +238,43 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         response.headers["Refresh"] = f"0; url={tariff_url}"
         return response
 
-    # iOS / прочие: запускаем PAY_WINDOW в фоне и отдаём страницу-лоадер.
-    # JS на ней ждёт 3с (биндинг создаётся за ~200ms) и делает window.location.replace('/tariffs').
-    # Пользователь видит спиннер, iOS не получает 303 с уже готовым интернетом
-    # и не уходит в 40-секундный цикл captive-detection.
-    asyncio.ensure_future(_create_pay_window(mac, router_id, cid))
-    logger.info(f"[prepare_and_tariffs] loading page (PAY_WINDOW in bg) cid={cid} mac={mac[:8]}***")
-    response = templates.TemplateResponse(
-        "loading.html",
-        {"request": request, "mac": mac, "router_id": router_id, "cid": cid},
-    )
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
+    # iOS / прочие: мгновенный 303 → /tariffs. PAY_WINDOW создаётся позже —
+    # только когда пользователь нажмёт «Оплатить» (маршрут /open_payment).
+    # Это устраняет 40-секундный freeze: iOS не обнаруживает интернет во время
+    # навигации CNA, а только уже после нажатия "Оплатить".
+    logger.info(f"[prepare_and_tariffs] 303 → tariffs cid={cid} mac={mac[:8]}***")
+    return RedirectResponse(url=tariff_url, status_code=303)
+
+
+@router.get("/open_payment")
+async def open_payment(
+    request: Request,
+    amount: int,
+    mac: str,
+    router_id: str = "astana_01",
+    cid: str = "",
+):
+    """iOS: CNA navigates здесь (HTTP). Создаём PAY_WINDOW, редиректим на HTTPS.
+    iOS не может обработать HTTPS в CNA → открывает Safari автоматически.
+    PAY_WINDOW создаётся только когда пользователь нажал «Оплатить» — CNA не зависает."""
+    cid = (cid or "-")[:24]
+    logger.info(f"[open_payment] START cid={cid} amount={amount} mac={mac[:8]}*** router={router_id}")
+
+    _, _, _, allowed_amounts = get_tariff_runtime_state()
+    if amount not in allowed_amounts:
+        return utf8_json_response({"error": "Некорректная сумма"}, status_code=400)
+    if not _is_valid_mac(mac or ""):
+        return utf8_json_response({"error": "Некорректный MAC-адрес"}, status_code=400)
+    if router_id not in ROUTERS_CONFIG:
+        return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    ok, err = await _create_pay_window(mac, router_id, cid)
+    if not ok:
+        return err
+
+    choose_url = f"https://wifi-pay.kz/choose_payment?{urlencode({'amount': amount, 'mac': mac, 'router_id': router_id, 'cid': cid})}"
+    logger.info("[open_payment] PAY_WINDOW ready → Safari cid=%s", cid)
+    return RedirectResponse(url=choose_url, status_code=302)
 
 
 @router.get("/tariffs", response_class=HTMLResponse)
