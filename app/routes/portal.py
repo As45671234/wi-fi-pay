@@ -238,12 +238,12 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         response.headers["Refresh"] = f"0; url={tariff_url}"
         return response
 
-    # iOS / прочие: отдаём страницу-лоадер.
-    # JS на ней вызывает /api/prepare_access (создаёт PAY_WINDOW, ~200ms),
-    # после ответа делает window.location.replace('/tariffs').
+    # iOS / прочие: запускаем PAY_WINDOW в фоне и отдаём страницу-лоадер.
+    # JS на ней ждёт 3с (биндинг создаётся за ~200ms) и делает window.location.replace('/tariffs').
     # Пользователь видит спиннер, iOS не получает 303 с уже готовым интернетом
     # и не уходит в 40-секундный цикл captive-detection.
-    logger.info(f"[prepare_and_tariffs] loading page cid={cid} mac={mac[:8]}***")
+    asyncio.ensure_future(_create_pay_window(mac, router_id, cid))
+    logger.info(f"[prepare_and_tariffs] loading page (PAY_WINDOW in bg) cid={cid} mac={mac[:8]}***")
     response = templates.TemplateResponse(
         "loading.html",
         {"request": request, "mac": mac, "router_id": router_id, "cid": cid},

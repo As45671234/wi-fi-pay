@@ -46,29 +46,11 @@
                   + '&cid=' + encodeURIComponent(cid);
 
     // Если через 10с ничего — всё равно переходим (/start_payment подстрахует).
-    var gone = false;
-    function go() {
-        if (gone) return;
-        gone = true;
+    // PAY_WINDOW создаётся на сервере в фоне (fire-and-forget при загрузке /prepare_and_tariffs).
+    // Ждём минимум 3 секунды — за это время биндинг гарантированно создаётся (~200ms).
+    setTimeout(function() {
         window.location.replace(tariffUrl);
-    }
-    var safetyTimer = setTimeout(go, 10000);
-
-    fetch('/api/prepare_access', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac: mac, router_id: routerId, cid: cid })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        clearTimeout(safetyTimer);
-        go();
-    })
-    .catch(function() {
-        clearTimeout(safetyTimer);
-        // Ошибка: переходим без PAY_WINDOW — /start_payment создаст при оплате.
-        go();
-    });
+    }, 3000);
     </script>
 </body>
 </html>
