@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..config import (
-    ROUTERS_CONFIG, BASE_URL, templates,
+    ROUTERS_CONFIG, BASE_URL, MIKROTIK_EXECUTOR, templates,
     QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS, QR_FALLBACK_POLL_TIMEOUT_AUTO_SECONDS,
     QR_CLIENT_AUTO_RETRY_MS, QR_CLIENT_FIRST_RETRY_MS,
     DEVICE_COOKIE_NAME, logger,
@@ -93,9 +93,10 @@ async def qr_entry(
 
     busy_macs = _get_busy_activation_macs(router_id)
     fallback_reason = "not_tried"
+    loop = asyncio.get_running_loop()
     try:
         fallback_mac, fallback_reason = await asyncio.wait_for(
-            asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
+            loop.run_in_executor(MIKROTIK_EXECUTOR, _pick_qr_mac_fallback, router_id, busy_macs),
             timeout=QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -158,9 +159,10 @@ async def qr_auto_pick(request: Request, router_id: str, cid: str = "", ts: str 
             )
 
     busy_macs = _get_busy_activation_macs(router_id)
+    loop = asyncio.get_running_loop()
     try:
         fallback_mac, fallback_reason = await asyncio.wait_for(
-            asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
+            loop.run_in_executor(MIKROTIK_EXECUTOR, _pick_qr_mac_fallback, router_id, busy_macs),
             timeout=QR_FALLBACK_POLL_TIMEOUT_AUTO_SECONDS,
         )
     except asyncio.TimeoutError:

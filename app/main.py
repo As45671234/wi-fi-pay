@@ -98,6 +98,7 @@ async def _shutdown():
         except Exception:
             pass
         cfg.pending_activation_task = None
+    cfg.MIKROTIK_EXECUTOR.shutdown(wait=False)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import time
 import logging
 import asyncio
 import threading
+import concurrent.futures
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -74,6 +75,15 @@ TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
 TRIAL_RATE_LIMIT_MAX_REQUESTS = 6
 
 PREPARE_TIMEOUT_SECONDS = 10
+
+# ── Dedicated MikroTik thread pool ─────────────────────────────────────────
+# 20 threads so 10+ simultaneous users never exhaust the pool.
+# Each MikroTik call blocks ≤8 s (socket timeout), so 20 threads handle
+# at least 20 concurrent calls before any queuing occurs.
+MIKROTIK_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=20,
+    thread_name_prefix="mikrotik",
+)
 
 # ── QR flow ────────────────────────────────────────────────────────────────
 QR_TOKEN_TTL_SECONDS = max(60, int(os.getenv("QR_TOKEN_TTL_SECONDS", str(60 * 60 * 24 * 365)) or str(60 * 60 * 24 * 365)))

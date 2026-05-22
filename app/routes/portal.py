@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..config import (
-    ROUTERS_CONFIG, PREPARE_TIMEOUT_SECONDS, templates,
+    ROUTERS_CONFIG, PREPARE_TIMEOUT_SECONDS, MIKROTIK_EXECUTOR, templates,
     QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS, logger,
 )
 from ..db import get_db
@@ -32,9 +32,30 @@ router = APIRouter()
 
 async def _create_pay_window(mac: str, router_id: str, cid: str) -> tuple[bool, object]:
     """Открывает PAY_WINDOW на MikroTik и записывает строку в orders."""
+    # ── Fast path: уже есть живой PAY_WINDOW в БД — пропускаем MikroTik ──
+    conn = get_db()
+    try:
+        existing = conn.execute(
+            "SELECT id FROM orders WHERE mac_address=? AND router_id=?"
+            " AND status='PAY_WINDOW' AND expires_at > datetime('now')"
+            " ORDER BY id DESC LIMIT 1",
+            (mac, router_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    if existing:
+        logger.info("[PAY_WINDOW] cache hit cid=%s mac=%s*** router=%s",
+                    cid, mac[:8], router_id)
+        return True, None
+
+    # ── Вызов MikroTik через выделенный пул потоков (20 потоков) ──────────
+    loop = asyncio.get_running_loop()
     try:
         ok = await asyncio.wait_for(
-            asyncio.to_thread(set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW"),
+            loop.run_in_executor(
+                MIKROTIK_EXECUTOR,
+                set_mikrotik_ah_access, mac, router_id, 3, "PAY_WINDOW",
+            ),
             timeout=PREPARE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -164,9 +185,10 @@ async def welcome(request: Request, mac: str = "00:00:00:00:00:00", router_id: s
     if not _is_valid_mac(mac_norm) and router_id in ROUTERS_CONFIG:
         busy_macs = _get_busy_activation_macs(router_id)
         fallback_reason = "not_tried"
+        loop = asyncio.get_running_loop()
         try:
             fallback_mac, fallback_reason = await asyncio.wait_for(
-                asyncio.to_thread(_pick_qr_mac_fallback, router_id, busy_macs),
+                loop.run_in_executor(MIKROTIK_EXECUTOR, _pick_qr_mac_fallback, router_id, busy_macs),
                 timeout=QR_FALLBACK_POLL_TIMEOUT_Q_SECONDS,
             )
         except asyncio.TimeoutError:

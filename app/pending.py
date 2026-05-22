@@ -7,7 +7,8 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from .config import (
-    ROUTERS_CONFIG, PENDING_ACTIVATION_MAX_ATTEMPTS,
+    ROUTERS_CONFIG, MIKROTIK_EXECUTOR,
+    PENDING_ACTIVATION_MAX_ATTEMPTS,
     PENDING_ACTIVATION_RETRY_DELAY_SECONDS,
     PENDING_ACTIVATION_LOOP_INTERVAL_SECONDS,
     pending_activation_stop, logger,
@@ -218,8 +219,9 @@ def _process_one_pending_activation() -> bool:
 
 async def _drain_pending_activations(limit: int = 1) -> int:
     processed = 0
+    loop = asyncio.get_running_loop()
     for _ in range(max(1, int(limit))):
-        ok = await asyncio.to_thread(_process_one_pending_activation)
+        ok = await loop.run_in_executor(MIKROTIK_EXECUTOR, _process_one_pending_activation)
         if not ok:
             break
         processed += 1
