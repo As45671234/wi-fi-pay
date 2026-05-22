@@ -57,17 +57,9 @@
         window.location.replace(tariffUrl);
     }
 
-    var minWait = new Promise(function(resolve) { setTimeout(resolve, 1000); });
-    var pwReady = fetch('/api/prepare_access', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac: mac, router_id: routerId, cid: cid })
-    }).catch(function() {});  // ошибка — не страшно, /start_payment подстрахует
-
-    Promise.all([minWait, pwReady]).then(go);
-
-    // Страховка: не ждём дольше 8 секунд
-    setTimeout(go, 8000);
+    // Ждём 3 секунды — PAY_WINDOW создаётся на сервере в фоне (~200ms),
+    // пока пользователь читает страницу.
+    setTimeout(go, 3000);
     </script>
 </body>
 </html>
