@@ -20,6 +20,7 @@ from ..db import get_db
 from ..utils import utf8_json_response, _normalize_mac, _is_valid_mac, get_tariff_runtime_state
 from ..payments import get_signature, decode_nested_url_value, build_payment_url
 from ..pending import _enqueue_pending_activation, _drain_pending_activations
+from .portal import _create_pay_window
 
 router = APIRouter()
 
@@ -74,6 +75,14 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     if router_id not in ROUTERS_CONFIG:
         logger.error(f"[start_payment] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
+
+    # Синхронно гарантируем PAY_WINDOW перед редиректом на FreedomPay.
+    # force=True — всегда идём на MikroTik, не используем DB-кэш.
+    ok, _err = await _create_pay_window(mac, router_id, cid, force=True)
+    if not ok:
+        logger.warning(f"[start_payment] PAY_WINDOW FAIL (продолжаем) cid={cid} mac={mac[:8]}*** router={router_id}")
+    else:
+        logger.info(f"[start_payment] PAY_WINDOW OK cid={cid} mac={mac[:8]}*** router={router_id}")
 
     payment_order_id = str(int(time.time() * 1000))
     conn = get_db()

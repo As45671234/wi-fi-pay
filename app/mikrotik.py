@@ -53,7 +53,7 @@ def _make_router_api(config: dict, socket_timeout: float = 5.0):
 
 # ── Connectivity precheck ──────────────────────────────────────────────────
 
-def _router_api_reachable(ip: str, port: int, timeout_sec: float = 0.8) -> bool:
+def _router_api_reachable(ip: str, port: int, timeout_sec: float = 2.0) -> bool:
     try:
         with socket.create_connection((ip, port), timeout=timeout_sec):
             return True
