@@ -5,7 +5,7 @@ After=network.target wg-quick@wg0.service
 RequiresMountsFor=/home/ubuntu/wi-fi-pay
 
 [Service]
-Type=notify
+Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/wi-fi-pay
 Environment="PATH=/home/ubuntu/wi-fi-pay/venv/bin"
