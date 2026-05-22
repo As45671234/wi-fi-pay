@@ -4,6 +4,7 @@ app/mikrotik.py — All MikroTik RouterOS API interactions.
 
 import socket
 import time
+import threading
 from datetime import datetime, timedelta
 
 import inspect as _inspect
@@ -396,10 +397,31 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                 logger.info(f"[MK] binding print+cleanup: {(time.monotonic()-t1)*1000:.0f}ms")
                 t2 = time.monotonic()
                 binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f"PAY_WINDOW_{mac}"})
-                logger.info(f"[MK] binding add: {(time.monotonic()-t2)*1000:.0f}ms")
-                t3 = time.monotonic()
-                _mikrotik_setup_scheduler(api, sched, mac, user_name, "PAY_WINDOW", seconds, minutes)
-                logger.info(f"[MK] scheduler: {(time.monotonic()-t3)*1000:.0f}ms, PAY_WINDOW total: {(time.monotonic()-t0)*1000:.0f}ms")
+                logger.info(f"[MK] binding add: {(time.monotonic()-t2)*1000:.0f}ms — bypass активен")
+
+                # Scheduler запускаем в фоне: он нужен для авто-удаления через 180с,
+                # но ждать его ~400ms в основном потоке нет смысла — bypass уже работает.
+                _mac, _user, _secs, _mins = mac, user_name, seconds, minutes
+                _config_copy = dict(config)
+                def _sched_bg():
+                    t_bg = time.monotonic()
+                    bg_conn = None
+                    try:
+                        bg_conn, bg_api = _make_router_api(_config_copy, socket_timeout=8.0)
+                        bg_sched = bg_api.get_resource('/system/scheduler')
+                        _mikrotik_setup_scheduler(bg_api, bg_sched, _mac, _user, "PAY_WINDOW", _secs, _mins)
+                        logger.info(f"[MK] scheduler (bg): {(time.monotonic()-t_bg)*1000:.0f}ms")
+                    except Exception as _e:
+                        logger.error(f"[MK] scheduler bg error: {str(_e)[:100]}")
+                    finally:
+                        if bg_conn:
+                            try:
+                                bg_conn.disconnect()
+                            except Exception:
+                                pass
+                threading.Thread(target=_sched_bg, daemon=True).start()
+
+                logger.info(f"[MK] PAY_WINDOW ready (scheduler in bg): {(time.monotonic()-t0)*1000:.0f}ms")
                 return True
 
             binding = api.get_resource('/ip/hotspot/ip-binding')
