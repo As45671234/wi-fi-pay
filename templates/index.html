@@ -134,7 +134,7 @@
         <div class="tariff-list" id="tariff-list"></div>
 
         <div id="pay-btn-area">
-            <button class="btn" id="main-pay-btn" onclick="payNow()" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</button>
+            <a class="btn" id="main-pay-btn" href="#" target="_blank" rel="noopener noreferrer" onclick="return handlePayClick(event)" style="display: none; text-decoration: none; text-align: center;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</a>
         </div>
         
         <div class="mac-id">ID: <span id="mac-value">-</span> | ROUTER: <span id="router-value">-</span></div>
@@ -321,9 +321,11 @@
         
         const btnArea = document.getElementById('pay-btn-area');
         const payBtn = document.getElementById('main-pay-btn');
+        const paymentPath = `/choose_payment?amount=${amount}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+        payBtn.href = `https://wifi-pay.kz${paymentPath}`;
         btnArea.style.display = 'block';
         payBtn.style.display = 'block';
-        payBtn.innerText = `ОПЛАТИТЬ ${amount} ₸`;
+        payBtn.textContent = `ОПЛАТИТЬ ${amount} ₸`;
     }
 
     async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -336,39 +338,26 @@
         }
     }
 
-    function payNow() {
+    function handlePayClick(event) {
         const t0 = Date.now();
         logClient('pay_clicked', 0, 'amount=' + selectedAmt);
-        const btn = document.getElementById('main-pay-btn');
-        btn.disabled = true;
-        btn.innerText = "ПЕРЕХОДИМ К ОПЛАТЕ...";
 
-        const paymentPath = `/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
-        const absPaymentUrl = `https://wifi-pay.kz${paymentPath}`;
-
-        // Android: открываем внешний браузер через intent, чтобы выйти из captive webview.
+        // Android: перехватываем клик и делаем intent URL для Chrome.
         if (isAndroid) {
+            event.preventDefault();
+            const paymentPath = `/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+            const absPaymentUrl = `https://wifi-pay.kz${paymentPath}`;
             logClient('pay_nav_android', Date.now() - t0, 'intent_to_choose_payment');
             const intentUrl = 'intent://wifi-pay.kz' + paymentPath
                 + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='
                 + encodeURIComponent(absPaymentUrl) + ';end';
             window.location.replace(intentUrl);
-            return;
+            return false;
         }
 
-        // iOS: открываем новую вкладку через window.open (прямой жест → Safari).
-        if (isIOS) {
-            logClient('pay_nav_ios', Date.now() - t0, 'blank_tab_to_choose_payment');
-            window.open(absPaymentUrl, '_blank');
-            return;
-        }
-
-        const link = document.createElement('a');
-        logClient('pay_nav_other', Date.now() - t0, 'anchor_click_to_choose_payment_abs');
-        link.href = absPaymentUrl;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // iOS и остальные: href уже установлен в selectT(), target=_blank открывает Safari/новую вкладку.
+        logClient('pay_nav', Date.now() - t0, isIOS ? 'ios_anchor_blank' : 'other_anchor_blank');
+        return true;
     }
 
     async function payKaspi() {
