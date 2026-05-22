@@ -46,11 +46,28 @@
                   + '&cid=' + encodeURIComponent(cid);
 
     // Если через 10с ничего — всё равно переходим (/start_payment подстрахует).
-    // PAY_WINDOW создаётся на сервере в фоне (fire-and-forget при загрузке /prepare_and_tariffs).
-    // Ждём минимум 3 секунды — за это время биндинг гарантированно создаётся (~200ms).
-    setTimeout(function() {
+    // Сервер уже запустил PAY_WINDOW в фоне при загрузке этой страницы.
+    // Параллельно делаем свой fetch — переходим как только ОБА условия выполнены:
+    //   1) fetch к /api/prepare_access вернул ответ (PAY_WINDOW готов, обычно ~200ms)
+    //   2) прошло минимум 1 секунда (чтобы спиннер не мелькал)
+    var gone = false;
+    function go() {
+        if (gone) return;
+        gone = true;
         window.location.replace(tariffUrl);
-    }, 3000);
+    }
+
+    var minWait = new Promise(function(resolve) { setTimeout(resolve, 1000); });
+    var pwReady = fetch('/api/prepare_access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mac: mac, router_id: routerId, cid: cid })
+    }).catch(function() {});  // ошибка — не страшно, /start_payment подстрахует
+
+    Promise.all([minWait, pwReady]).then(go);
+
+    // Страховка: не ждём дольше 8 секунд
+    setTimeout(go, 8000);
     </script>
 </body>
 </html>
