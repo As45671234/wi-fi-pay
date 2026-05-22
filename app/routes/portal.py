@@ -30,29 +30,10 @@ router = APIRouter()
 
 # ── Helper: PAY_WINDOW ─────────────────────────────────────────────────────
 
-async def _create_pay_window(mac: str, router_id: str, cid: str, force: bool = False) -> tuple[bool, object]:
+async def _create_pay_window(mac: str, router_id: str, cid: str) -> tuple[bool, object]:
     """Открывает PAY_WINDOW на MikroTik и записывает строку в orders.
-    force=True — всегда идём на роутер (используется из choose_payment, чтобы
-    гарантировать свежий bypass перед оплатой).
+    Всегда идёт на MikroTik — без DB-кэша.
     """
-    # ── Fast path: уже есть живой PAY_WINDOW в БД — пропускаем MikroTik ──
-    # Пропускаем cache только если force=False И осталось >90 секунд.
-    if not force:
-        conn = get_db()
-        try:
-            existing = conn.execute(
-                "SELECT id FROM orders WHERE mac_address=? AND router_id=?"
-                " AND status='PAY_WINDOW' AND expires_at > datetime('now', '+90 seconds')"
-                " ORDER BY id DESC LIMIT 1",
-                (mac, router_id),
-            ).fetchone()
-        finally:
-            conn.close()
-        if existing:
-            logger.info("[PAY_WINDOW] cache hit cid=%s mac=%s*** router=%s",
-                        cid, mac[:8], router_id)
-            return True, None
-
     # ── Вызов MikroTik через выделенный пул потоков (20 потоков) ──────────
     loop = asyncio.get_running_loop()
     try:
@@ -165,16 +146,14 @@ async def prepare_access(request: Request):
     mac = data.get("mac", "")
     router_id = data.get("router_id", "astana_01")
     cid = (data.get("cid") or "-")[:24]
-    force = bool(data.get("force", False))
-
-    logger.info(f"[prepare_access] START cid={cid} force={force} mac={mac[:8]}*** router={router_id}")
+    logger.info(f"[prepare_access] START cid={cid} mac={mac[:8]}*** router={router_id}")
 
     if not _is_valid_mac(mac or ""):
         return utf8_json_response({"ok": False, "error": "Некорректный MAC"}, status_code=400)
     if router_id not in ROUTERS_CONFIG:
         return utf8_json_response({"ok": False, "error": "Неизвестный роутер"}, status_code=400)
 
-    ok, err = await _create_pay_window(mac, router_id, cid, force=force)
+    ok, err = await _create_pay_window(mac, router_id, cid)
     if not ok:
         return err
     logger.info("[prepare_access] DONE cid=%s in %.0fms ✓ mac=%s*** router=%s",
@@ -245,7 +224,7 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
     # Мягкий таймаут 3с: если роутер отвечает быстро — ждём полного результата;
     # если медленный — редиректим через 3с, фоновый поток всё равно создаст биндинг,
     # а /start_payment добавит force=True перед оплатой как страховку.
-    _pw_task = asyncio.ensure_future(_create_pay_window(mac, router_id, cid, force=True))
+    _pw_task = asyncio.ensure_future(_create_pay_window(mac, router_id, cid))
     try:
         ok, err = await asyncio.wait_for(asyncio.shield(_pw_task), timeout=3.0)
         if not ok:

@@ -78,7 +78,7 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
 
     # Синхронно гарантируем PAY_WINDOW перед редиректом на FreedomPay.
     # force=True — всегда идём на MikroTik, не используем DB-кэш.
-    ok, _err = await _create_pay_window(mac, router_id, cid, force=True)
+    ok, _err = await _create_pay_window(mac, router_id, cid)
     if not ok:
         logger.warning(f"[start_payment] PAY_WINDOW FAIL (продолжаем) cid={cid} mac={mac[:8]}*** router={router_id}")
     else:
