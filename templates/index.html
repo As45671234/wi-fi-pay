@@ -356,16 +356,10 @@
             return;
         }
 
-        // iOS: открываем новую вкладку, чтобы оплата сразу была в Safari.
+        // iOS: открываем новую вкладку через window.open (прямой жест → Safari).
         if (isIOS) {
             logClient('pay_nav_ios', Date.now() - t0, 'blank_tab_to_choose_payment');
-            const link = document.createElement('a');
-            link.href = absPaymentUrl;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            window.open(absPaymentUrl, '_blank');
             return;
         }
 
