@@ -220,25 +220,18 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
             "request": request, "mac": mac, "router_id": router_id, "cid": cid, "error": "Неизвестный роутер",
         })
 
-    t_start = time.monotonic()
-    # Мягкий таймаут 3с: если роутер отвечает быстро — ждём полного результата;
-    # если медленный — редиректим через 3с, фоновый поток всё равно создаст биндинг,
-    # а /start_payment добавит force=True перед оплатой как страховку.
-    _pw_task = asyncio.ensure_future(_create_pay_window(mac, router_id, cid))
-    try:
-        ok, err = await asyncio.wait_for(asyncio.shield(_pw_task), timeout=3.0)
-        if not ok:
-            return err
-    except asyncio.TimeoutError:
-        logger.warning("[prepare_and_tariffs] PAY_WINDOW >3s, redirect без ожидания cid=%s mac=%s***", cid, mac[:8])
+    # PAY_WINDOW запускаем полностью в фоне — НЕ ждём ответа.
+    # iOS CNA видит смену доступа (выданный интернет) ВО ВРЕМЯ навигации и зависает на 40+ сек.
+    # Пока пользователь читает тарифы (~5-10с), фоновый поток создаёт биндинг (~200ms).
+    # /start_payment создаёт биндинг ещё раз перед самой оплатой как страховку.
+    asyncio.ensure_future(_create_pay_window(mac, router_id, cid))
 
-    total_ms = (time.monotonic() - t_start) * 1000
     user_agent = (request.headers.get("user-agent") or "")
     is_android = bool(re.search(r"android", user_agent, re.IGNORECASE))
+    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
 
     if is_android:
-        logger.info(f"[prepare_and_tariffs] android bridge cid={cid}, total: {total_ms:.0f}ms для {mac[:8]}***")
-        tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
+        logger.info(f"[prepare_and_tariffs] android bridge cid={cid} mac={mac[:8]}***")
         response = templates.TemplateResponse(
             "android_bridge.html",
             {"request": request, "mac": mac, "router_id": router_id, "cid": cid},
@@ -249,8 +242,7 @@ async def prepare_and_tariffs(request: Request, mac: str, router_id: str = "asta
         response.headers["Refresh"] = f"0; url={tariff_url}"
         return response
 
-    logger.info(f"[prepare_and_tariffs] redirect cid={cid} -> /tariffs, total: {total_ms:.0f}ms для {mac[:8]}***")
-    tariff_url = f"/tariffs?{urlencode({'mac': mac, 'router_id': router_id, 'cid': cid})}"
+    logger.info(f"[prepare_and_tariffs] redirect cid={cid} -> /tariffs (PAY_WINDOW в фоне) mac={mac[:8]}***")
     return RedirectResponse(url=tariff_url, status_code=303)
 
 
