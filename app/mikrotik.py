@@ -6,6 +6,8 @@ import socket
 import time
 from datetime import datetime, timedelta
 
+import inspect as _inspect
+
 import routeros_api
 
 from .config import (
@@ -13,6 +15,25 @@ from .config import (
     QR_FALLBACK_MAX_IDLE_SECONDS, logger,
 )
 from .utils import _normalize_mac, _is_valid_mac, _routeros_duration_to_seconds
+
+# Check once whether routeros_api supports socket_timeout
+_POOL_HAS_SOCKET_TIMEOUT = 'socket_timeout' in _inspect.signature(
+    routeros_api.RouterOsApiPool.__init__
+).parameters
+
+
+def _make_router_pool(
+    ip: str, username: str, password: str,
+    port: int = 8728, socket_timeout: float = 5.0,
+) -> routeros_api.RouterOsApiPool:
+    """Create RouterOsApiPool, omitting socket_timeout if not supported."""
+    kwargs = dict(
+        username=username, password=password,
+        port=port, plaintext_login=True,
+    )
+    if _POOL_HAS_SOCKET_TIMEOUT:
+        kwargs['socket_timeout'] = socket_timeout
+    return routeros_api.RouterOsApiPool(ip, **kwargs)
 
 
 # ── Connectivity precheck ──────────────────────────────────────────────────
@@ -35,13 +56,9 @@ def _pick_qr_mac_fallback(router_id: str, busy_macs: set[str]) -> tuple[str | No
 
     connection = None
     try:
-        connection = routeros_api.RouterOsApiPool(
-            config['ip'],
-            username=config['user'],
-            password=config['pass'],
-            port=int(config.get('port', 8728)),
-            plaintext_login=True,
-            socket_timeout=1.0,
+        connection = _make_router_pool(
+            config['ip'], config['user'], config['pass'],
+            port=int(config.get('port', 8728)), socket_timeout=1.0,
         )
         api = connection.get_api()
         host_res = api.get_resource('/ip/hotspot/host')
@@ -127,13 +144,9 @@ def verify_access_activated(api, mac: str, user_name: str, mode: str) -> dict:
 
 def check_router_hotspot_enabled(config: dict) -> bool:
     try:
-        connection = routeros_api.RouterOsApiPool(
-            config['ip'],
-            username=config['user'],
-            password=config['pass'],
-            port=config.get('port', 8728),
-            plaintext_login=True,
-            socket_timeout=5.0,
+        connection = _make_router_pool(
+            config['ip'], config['user'], config['pass'],
+            port=config.get('port', 8728), socket_timeout=5.0,
         )
         api = connection.get_api()
         hotspot_profiles = api.get_resource('/ip/hotspot/profile').call('print')
@@ -326,13 +339,9 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
     for attempt in range(1, max_retries + 1):
         try:
             t0 = time.monotonic()
-            connection = routeros_api.RouterOsApiPool(
-                config['ip'],
-                username=config['user'],
-                password=config['pass'],
-                port=api_port,
-                plaintext_login=True,
-                socket_timeout=8.0,
+            connection = _make_router_pool(
+                config['ip'], config['user'], config['pass'],
+                port=api_port, socket_timeout=8.0,
             )
             api = connection.get_api()
             logger.info(f"[MK] connect {router_id}: {(time.monotonic()-t0)*1000:.0f}ms (attempt {attempt})")
