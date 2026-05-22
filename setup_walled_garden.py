@@ -85,7 +85,7 @@ def main():
 
     print(f"\nДобавляем {vps_ip}/32 в walled-garden-ip на всех роутерах:\n")
 
-    with open("routers_config.json", encoding="utf-8") as f:
+    with open("routers_config.json", encoding="utf-8-sig") as f:
         routers = json.load(f)
 
     ok = 0
