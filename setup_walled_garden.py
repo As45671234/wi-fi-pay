@@ -42,7 +42,7 @@ def add_walled_garden(config: dict, vps_ip: str) -> bool:
     try:
         connection = routeros_api.RouterOsApiPool(
             ip, username=user, password=password,
-            port=port, plaintext_login=True, socket_timeout=8.0,
+            port=port, plaintext_login=True,
         )
         api = connection.get_api()
         wg = api.get_resource("/ip/hotspot/walled-garden-ip")
