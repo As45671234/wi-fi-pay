@@ -8,11 +8,27 @@ setup_walled_garden.py — Добавляет VPS IP в walled-garden-ip на в
 и iOS 36-секундный freeze полностью исчезнет.
 """
 import json
+import os
 import socket
 import sys
 import urllib.request
 
 import routeros_api
+
+
+def _load_env(path: str = ".env") -> dict:
+    """Загружаем .env вручную (без зависимостей)."""
+    env = {}
+    if not os.path.exists(path):
+        return env
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            env[key.strip()] = val.strip().strip('"').strip("'")
+    return env
 
 
 def get_vps_ip() -> str:
@@ -74,6 +90,13 @@ def add_walled_garden(config: dict, vps_ip: str) -> bool:
 def main():
     print("=== WiFiPay: настройка Walled Garden ===\n")
 
+    # Загружаем учётные данные из .env (ROUTER_USER / ROUTER_PASS)
+    env = _load_env()
+    global_user = env.get("ROUTER_USER", "").strip()
+    global_pass = env.get("ROUTER_PASS", "").strip()
+    if global_user:
+        print(f"Учётные данные из .env: user={global_user}")
+
     # Определяем IP VPS
     if len(sys.argv) > 1:
         vps_ip = sys.argv[1]
@@ -91,6 +114,11 @@ def main():
     ok = 0
     fail = 0
     for router in routers:
+        # Применяем глобальные credentials из .env (приоритет над JSON)
+        if global_user:
+            router["user"] = global_user
+        if global_pass:
+            router["pass"] = global_pass
         if add_walled_garden(router, vps_ip):
             ok += 1
         else:
