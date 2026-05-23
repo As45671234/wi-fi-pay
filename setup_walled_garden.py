@@ -61,7 +61,19 @@ def add_walled_garden(config: dict, vps_ip: str) -> bool:
             port=port, plaintext_login=True,
         )
         api = connection.get_api()
-        wg = api.get_resource("/ip/hotspot/walled-garden-ip")
+        # RouterOS 7.x: /ip/hotspot/walled-garden-ip
+        # RouterOS 6.x: /ip/hotspot/walled-garden/ip
+        wg = None
+        for path in ["/ip/hotspot/walled-garden-ip", "/ip/hotspot/walled-garden/ip"]:
+            try:
+                wg = api.get_resource(path)
+                wg.get()  # проверяем, что путь существует
+                break
+            except Exception:
+                wg = None
+        if wg is None:
+            print("ОШИБКА: walled-garden-ip не поддерживается")
+            return False
 
         # Проверяем, нет ли уже такой записи
         existing = wg.get()
