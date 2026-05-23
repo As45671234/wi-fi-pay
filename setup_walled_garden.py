@@ -64,9 +64,9 @@ def add_walled_garden(config: dict, vps_ip: str) -> bool:
         wg = api.get_resource("/ip/hotspot/walled-garden-ip")
 
         # Проверяем, нет ли уже такой записи
-        existing = wg.call("print", queries={"dst-address": f"{vps_ip}/32"})
-        if existing:
-            print(f"уже есть ✓")
+        existing = wg.get()
+        if any(e.get('dst-address') == f"{vps_ip}/32" for e in existing):
+            print("уже есть ✓")
             return True
 
         wg.call("add", arguments={
