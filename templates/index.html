@@ -355,19 +355,23 @@
         const t0 = Date.now();
         logClient('pay_clicked', 0, 'amount=' + selectedAmt);
 
-        // iOS: открываем HTTPS choose_payment напрямую → Safari.
-        // ТРЕБУЕТ walled-garden-ip на MikroTik (wifi-pay.kz доступен без PAY_WINDOW).
-        // Без walled garden: Safari не откроется (HTTPS заблокирован MikroTik).
-        // С walled garden: мгновенно, без 36-секундного freeze.
+        // iOS: сначала создаём PAY_WINDOW, потом открываем choose_payment.
+        // Спиннер показывает пока PAY_WINDOW не готов (~128мс).
         if (isIOS) {
             event.preventDefault();
             var ol = document.createElement('div');
             ol.className = 'pay-overlay';
             ol.innerHTML = '<div class="pay-overlay-spinner"></div><div class="pay-overlay-text">Открываем оплату...</div>';
             document.body.appendChild(ol);
-            const chooseUrl = `https://wifi-pay.kz/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
-            logClient('pay_nav', Date.now() - t0, 'ios_choose_direct');
-            setTimeout(function() { window.location.href = chooseUrl; }, 60);
+            const chooseUrl = `/choose_payment?amount=${selectedAmt}&mac=${encodeURIComponent(macAddress)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+            fetch('/api/prepare_access', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mac: macAddress, router_id: routerId, cid: cid})
+            }).catch(function(){}).finally(function() {
+                logClient('pay_nav', Date.now() - t0, 'ios_pay_window_ready');
+                window.location.href = chooseUrl;
+            });
             return false;
         }
 
