@@ -153,13 +153,13 @@
 <div class="summary-cards">
     <div class="card">
         <div class="label">Всего оплат</div>
-        <div class="value blue">{{ data.totals.total_paid }}</div>
-        <div class="sub">FP: {{ data.totals.freedompay_paid }} / Kaspi: {{ data.totals.kaspi_paid }}</div>
+        <div class="value blue" id="card-total-paid">{{ data.totals.total_paid }}</div>
+        <div class="sub" id="card-total-paid-sub">FP: {{ data.totals.freedompay_paid }} / Kaspi: {{ data.totals.kaspi_paid }}</div>
     </div>
     <div class="card">
         <div class="label">Выручка всего</div>
-        <div class="value green">{{ "{:,}".format(data.totals.total_revenue) }} ₸</div>
-        <div class="sub">FP: {{ "{:,}".format(data.totals.freedompay_revenue) }} · K: {{ "{:,}".format(data.totals.kaspi_revenue) }}</div>
+        <div class="value green" id="card-total-rev">{{ "{:,}".format(data.totals.total_revenue) }} ₸</div>
+        <div class="sub" id="card-total-rev-sub">FP: {{ "{:,}".format(data.totals.freedompay_revenue) }} · K: {{ "{:,}".format(data.totals.kaspi_revenue) }}</div>
     </div>
     <div class="card">
         <div class="label">Сегодня</div>
@@ -178,7 +178,7 @@
     </div>
     <div class="card">
         <div class="label">Трайалов всего</div>
-        <div class="value" style="color:#64748b">{{ data.totals.trial_total }}</div>
+        <div class="value" id="card-total-tr" style="color:#64748b">{{ data.totals.trial_total }}</div>
         <div class="sub">бесплатно</div>
     </div>
 </div>
@@ -220,6 +220,11 @@
 
         {% set paid = summary.total_paid %}
         {% set rev  = summary.total_revenue %}
+        {% set ns.tot_paid = ns.tot_paid + paid %}
+        {% set ns.tot_rev  = ns.tot_rev  + rev %}
+        {% set ns.tot_fp   = ns.tot_fp   + fp.total %}
+        {% set ns.tot_kp   = ns.tot_kp   + ka.total %}
+        {% set ns.tot_tr   = ns.tot_tr   + tr.total %}
 
         {# период-зависимые значения задаём через data-атрибуты #}
         <tr
@@ -428,6 +433,17 @@ function switchPeriod(period, btn) {
     if (footerFp) footerFp.innerHTML = totalFp > 0 ? '<span class="badge badge-fp">' + totalFp + '</span>' : '<span class="zero">—</span>';
     if (footerKa) footerKa.innerHTML = totalKa > 0 ? '<span class="badge badge-k">' + totalKa + '</span>' : '<span class="zero">—</span>';
     if (footerTr) footerTr.innerHTML = totalTr > 0 ? '<span class="badge badge-tr">' + totalTr + '</span>' : '<span class="zero">—</span>';
+
+    const cardPaid = document.getElementById('card-total-paid');
+    const cardPaidSub = document.getElementById('card-total-paid-sub');
+    const cardRev = document.getElementById('card-total-rev');
+    const cardRevSub = document.getElementById('card-total-rev-sub');
+    const cardTr = document.getElementById('card-total-tr');
+    if (cardPaid) cardPaid.textContent = totalPaid;
+    if (cardPaidSub) cardPaidSub.textContent = 'FP: ' + totalFp + ' / Kaspi: ' + totalKa;
+    if (cardRev) cardRev.textContent = totalRev > 0 ? totalRev.toLocaleString('ru-RU') + ' ₸' : '0 ₸';
+    if (cardRevSub) cardRevSub.textContent = '';
+    if (cardTr) cardTr.textContent = totalTr;
 
     document.querySelectorAll('tfoot .footer-tariff').forEach((cell, index) => {
         const value = tariffTotals[index] || 0;

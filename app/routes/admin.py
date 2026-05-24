@@ -65,12 +65,13 @@ def _collect_router_stats() -> dict:
                 SUM(CASE WHEN date(created_at, '+5 hours') = ? THEN amount ELSE 0 END) AS today_revenue,
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS week_cnt,
                 SUM(CASE WHEN created_at >= ? THEN amount ELSE 0 END) AS week_revenue,
-                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS month_cnt
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS month_cnt,
+                SUM(CASE WHEN created_at >= ? THEN amount ELSE 0 END) AS month_revenue
             FROM orders
             WHERE status = 'PAID' AND router_id IS NOT NULL AND amount > 0
             GROUP BY router_id, amount
             ORDER BY router_id, amount
-        """, (today_str, today_str, week_ago_utc, week_ago_utc, month_ago_utc)).fetchall()
+        """, (today_str, today_str, week_ago_utc, week_ago_utc, month_ago_utc, month_ago_utc)).fetchall()
 
         kaspi_rows = conn.execute("""
             SELECT
@@ -82,12 +83,13 @@ def _collect_router_stats() -> dict:
                 SUM(CASE WHEN date(COALESCE(activated_at, created_at), '+5 hours') = ? THEN amount ELSE 0 END) AS today_revenue,
                 SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN 1 ELSE 0 END) AS week_cnt,
                 SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN amount ELSE 0 END) AS week_revenue,
-                SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN 1 ELSE 0 END) AS month_cnt
+                SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN 1 ELSE 0 END) AS month_cnt,
+                SUM(CASE WHEN COALESCE(activated_at, created_at) >= ? THEN amount ELSE 0 END) AS month_revenue
             FROM kaspi_orders
             WHERE is_activated = 1 AND router_id IS NOT NULL AND amount > 0
             GROUP BY router_id, amount
             ORDER BY router_id, amount
-        """, (today_str, today_str, week_ago_utc, week_ago_utc, month_ago_utc)).fetchall()
+        """, (today_str, today_str, week_ago_utc, week_ago_utc, month_ago_utc, month_ago_utc)).fetchall()
 
         trial_rows = conn.execute("""
             SELECT
@@ -124,6 +126,7 @@ def _collect_router_stats() -> dict:
         d["week"]    += r["week_cnt"] or 0
         d["week_revenue"] += r["week_revenue"] or 0
         d["month"]   += r["month_cnt"] or 0
+        d["month_revenue"] += r["month_revenue"] or 0
         d["by_tariff"][str(r["amount"])] = {
             "count":   r["cnt"],
             "revenue": r["revenue"],
@@ -132,6 +135,7 @@ def _collect_router_stats() -> dict:
             "week":    r["week_cnt"],
             "week_revenue": r["week_revenue"],
             "month":   r["month_cnt"],
+            "month_revenue": r["month_revenue"],
         }
 
     for r in kaspi_rows:
@@ -143,6 +147,7 @@ def _collect_router_stats() -> dict:
         d["week"]    += r["week_cnt"] or 0
         d["week_revenue"] += r["week_revenue"] or 0
         d["month"]   += r["month_cnt"] or 0
+        d["month_revenue"] += r["month_revenue"] or 0
         d["by_tariff"][str(r["amount"])] = {
             "count":   r["cnt"],
             "revenue": r["revenue"],
@@ -151,6 +156,7 @@ def _collect_router_stats() -> dict:
             "week":    r["week_cnt"],
             "week_revenue": r["week_revenue"],
             "month":   r["month_cnt"],
+            "month_revenue": r["month_revenue"],
         }
 
     for r in trial_rows:
