@@ -145,5 +145,19 @@
         "user":  "",
         "pass":  "",
         "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_22",
+        "ip":  "10.0.0.23",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_23",
+        "ip":  "10.0.0.24",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
     }
 ]
