@@ -166,6 +166,9 @@ def _collect_router_stats() -> dict:
         d["week"]  += r["week_cnt"]
         d["month"] += r["month_cnt"]
 
+    for rid in ROUTERS_CONFIG:
+        _ensure_router(rid)
+
     for rid, rd in routers.items():
         fp = rd["freedompay"]
         ka = rd["kaspi"]
@@ -274,6 +277,9 @@ def _collect_router_stats_range(from_date: str, to_date: str) -> dict:
 
     for r in trial_rows:
         _ensure(r["router_id"])["trial"] = r["cnt"]
+
+    for rid in ROUTERS_CONFIG:
+        _ensure(rid)
 
     routers = dict(sorted(routers.items()))
     return {
