@@ -219,6 +219,98 @@ def _collect_router_stats() -> dict:
     return _result
 
 
+def _collect_router_stats_range(from_date: str, to_date: str) -> dict:
+    """Aggregate stats for a custom date range (KZ time UTC+5, both dates inclusive)."""
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        fp_rows = conn.execute("""
+            SELECT router_id, amount, COUNT(*) AS cnt, SUM(amount) AS revenue
+            FROM orders
+            WHERE status = 'PAID' AND router_id IS NOT NULL AND amount > 0
+              AND date(created_at, '+5 hours') BETWEEN ? AND ?
+            GROUP BY router_id, amount
+        """, (from_date, to_date)).fetchall()
+
+        kaspi_rows = conn.execute("""
+            SELECT router_id, amount, COUNT(*) AS cnt, SUM(amount) AS revenue
+            FROM kaspi_orders
+            WHERE is_activated = 1 AND router_id IS NOT NULL AND amount > 0
+              AND date(COALESCE(activated_at, created_at), '+5 hours') BETWEEN ? AND ?
+            GROUP BY router_id, amount
+        """, (from_date, to_date)).fetchall()
+
+        trial_rows = conn.execute("""
+            SELECT router_id, COUNT(*) AS cnt
+            FROM orders
+            WHERE status = 'TRIAL' AND router_id IS NOT NULL
+              AND date(created_at, '+5 hours') BETWEEN ? AND ?
+            GROUP BY router_id
+        """, (from_date, to_date)).fetchall()
+    finally:
+        conn.close()
+
+    routers: dict = {}
+
+    def _ensure(rid: str) -> dict:
+        if rid not in routers:
+            routers[rid] = {"paid": 0, "revenue": 0, "fp": 0, "fp_revenue": 0,
+                            "ka": 0, "ka_revenue": 0, "trial": 0, "by_tariff": {}}
+        return routers[rid]
+
+    for r in fp_rows:
+        d = _ensure(r["router_id"])
+        cnt, rev = r["cnt"], r["revenue"] or 0
+        d["paid"] += cnt; d["revenue"] += rev; d["fp"] += cnt; d["fp_revenue"] += rev
+        bt = d["by_tariff"].setdefault(str(r["amount"]), {"count": 0, "fp": 0, "ka": 0})
+        bt["count"] += cnt; bt["fp"] += cnt
+
+    for r in kaspi_rows:
+        d = _ensure(r["router_id"])
+        cnt, rev = r["cnt"], r["revenue"] or 0
+        d["paid"] += cnt; d["revenue"] += rev; d["ka"] += cnt; d["ka_revenue"] += rev
+        bt = d["by_tariff"].setdefault(str(r["amount"]), {"count": 0, "fp": 0, "ka": 0})
+        bt["count"] += cnt; bt["ka"] += cnt
+
+    for r in trial_rows:
+        _ensure(r["router_id"])["trial"] = r["cnt"]
+
+    routers = dict(sorted(routers.items()))
+    return {
+        "from_date": from_date,
+        "to_date": to_date,
+        "totals": {
+            "total_paid":         sum(d["paid"]       for d in routers.values()),
+            "total_revenue":      sum(d["revenue"]     for d in routers.values()),
+            "freedompay_paid":    sum(d["fp"]          for d in routers.values()),
+            "freedompay_revenue": sum(d["fp_revenue"]  for d in routers.values()),
+            "kaspi_paid":         sum(d["ka"]          for d in routers.values()),
+            "kaspi_revenue":      sum(d["ka_revenue"]  for d in routers.values()),
+            "trial_total":        sum(d["trial"]       for d in routers.values()),
+        },
+        "routers": routers,
+    }
+
+
+@router.get("/api/admin/stats/range")
+async def admin_stats_range(request: Request, from_date: str, to_date: str):
+    import hmac as _h
+    url_token = (request.query_params.get("token") or "").strip()
+    if not _has_admin_auth(request):
+        if not (url_token and ADMIN_TOKEN and _h.compare_digest(url_token, ADMIN_TOKEN)):
+            return utf8_json_response({"error": "Unauthorized"}, status_code=401)
+    try:
+        from datetime import date as _date
+        _date.fromisoformat(from_date)
+        _date.fromisoformat(to_date)
+    except ValueError:
+        return utf8_json_response({"error": "Invalid date format, expected YYYY-MM-DD"}, status_code=400)
+    if from_date > to_date:
+        from_date, to_date = to_date, from_date
+    data = await asyncio.to_thread(_collect_router_stats_range, from_date, to_date)
+    return utf8_json_response(data)
+
+
 @router.get("/health")
 async def health_check(request: Request):
     if not _has_admin_auth(request):

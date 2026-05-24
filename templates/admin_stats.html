@@ -105,16 +105,17 @@
         .router-name { font-family: monospace; font-size: 0.88rem; }
         .zero { color: #cbd5e1; }
 
-        /* Секция детализации по тарифам */
         .tariff-detail { font-size: 0.72rem; color: #94a3b8; margin-top: 3px; }
         .tariff-item { display: inline-block; margin-right: 6px; }
 
-        /* Переключатель периода */
+        /* ── Переключатель периода ── */
+        .controls { margin-bottom: 20px; }
+
         .period-tabs {
             display: flex;
             gap: 8px;
-            margin-bottom: 16px;
             flex-wrap: wrap;
+            margin-bottom: 10px;
         }
         .period-tabs button {
             background: #fff;
@@ -124,6 +125,7 @@
             font-size: 0.82rem;
             cursor: pointer;
             transition: all .15s;
+            font-family: inherit;
         }
         .period-tabs button.active,
         .period-tabs button:hover {
@@ -132,8 +134,97 @@
             border-color: #2563eb;
         }
 
+        /* ── Custom date range picker ── */
+        .custom-range {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 14px;
+            background: #fff;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 10px;
+            flex-wrap: wrap;
+            transition: border-color .2s, background .2s;
+        }
+        .custom-range.range-active {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+        .range-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #475569;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .range-inputs {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        input[type="date"].date-input {
+            border: 1px solid #e2e8f0;
+            border-radius: 7px;
+            padding: 5px 10px;
+            font-size: 0.82rem;
+            color: #1e293b;
+            background: #f8fafc;
+            outline: none;
+            cursor: pointer;
+            font-family: inherit;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        input[type="date"].date-input:focus {
+            border-color: #2563eb;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+        }
+        .range-arrow {
+            color: #94a3b8;
+            font-size: 1rem;
+            user-select: none;
+        }
+        .btn-apply {
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 7px;
+            padding: 5px 16px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .15s;
+            font-family: inherit;
+            white-space: nowrap;
+        }
+        .btn-apply:hover  { background: #1d4ed8; }
+        .btn-apply:active { background: #1e40af; }
+        .btn-apply:disabled { background: #94a3b8; cursor: not-allowed; }
+
+        .range-spinner {
+            display: none;
+            color: #2563eb;
+            font-size: 1.1rem;
+            line-height: 1;
+            animation: spin .7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .range-badge {
+            display: none;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #1d4ed8;
+            background: #dbeafe;
+            border-radius: 6px;
+            padding: 3px 10px;
+            white-space: nowrap;
+        }
+
         @media (max-width: 600px) {
             .summary-cards { grid-template-columns: 1fr 1fr; }
+            .custom-range { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
@@ -183,12 +274,27 @@
     </div>
 </div>
 
-<!-- Переключатель периода -->
-<div class="period-tabs">
-    <button class="active" onclick="switchPeriod('total', this)">Всё время</button>
-    <button onclick="switchPeriod('today', this)">Сегодня</button>
-    <button onclick="switchPeriod('week', this)">7 дней</button>
-    <button onclick="switchPeriod('month', this)">30 дней</button>
+<!-- Управление периодом -->
+<div class="controls">
+    <div class="period-tabs">
+        <button class="active" onclick="switchPeriod('total', this)">Всё время</button>
+        <button onclick="switchPeriod('today', this)">Сегодня</button>
+        <button onclick="switchPeriod('week', this)">7 дней</button>
+        <button onclick="switchPeriod('month', this)">30 дней</button>
+    </div>
+    <div class="custom-range" id="custom-range">
+        <span class="range-label">📅 Свой период</span>
+        <div class="range-inputs">
+            <input type="date" class="date-input" id="date-from"
+                   value="{{ data.today_date }}" max="{{ data.today_date }}">
+            <span class="range-arrow">—</span>
+            <input type="date" class="date-input" id="date-to"
+                   value="{{ data.today_date }}" max="{{ data.today_date }}">
+            <button class="btn-apply" id="btn-apply" onclick="applyCustomRange()">Применить</button>
+            <span class="range-spinner" id="range-spinner">↻</span>
+        </div>
+        <span class="range-badge" id="range-badge"></span>
+    </div>
 </div>
 
 <!-- Основная таблица -->
@@ -226,35 +332,41 @@
         {% set ns.tot_kp   = ns.tot_kp   + ka.total %}
         {% set ns.tot_tr   = ns.tot_tr   + tr.total %}
 
-        {# период-зависимые значения задаём через data-атрибуты #}
         <tr
             data-total-paid="{{ paid }}"
             data-total-rev="{{ rev }}"
             data-total-fp="{{ fp.total }}"
             data-total-ka="{{ ka.total }}"
             data-total-tr="{{ tr.total }}"
+            data-total-fp-rev="{{ fp.revenue }}"
+            data-total-ka-rev="{{ ka.revenue }}"
             data-today-paid="{{ summary.today_paid }}"
             data-today-rev="{{ summary.today_revenue }}"
             data-today-fp="{{ fp.today }}"
             data-today-ka="{{ ka.today }}"
             data-today-tr="{{ tr.today }}"
+            data-today-fp-rev="{{ fp.today_revenue }}"
+            data-today-ka-rev="{{ ka.today_revenue }}"
             data-week-paid="{{ summary.week_paid }}"
             data-week-rev="{{ summary.week_revenue }}"
             data-week-fp="{{ fp.week }}"
             data-week-ka="{{ ka.week }}"
             data-week-tr="{{ tr.week }}"
+            data-week-fp-rev="{{ fp.week_revenue }}"
+            data-week-ka-rev="{{ ka.week_revenue }}"
             data-month-paid="{{ summary.month_paid }}"
             data-month-rev="{{ summary.month_revenue }}"
             data-month-fp="{{ fp.month }}"
             data-month-ka="{{ ka.month }}"
             data-month-tr="{{ tr.month }}"
+            data-month-fp-rev="{{ fp.month_revenue }}"
+            data-month-ka-rev="{{ ka.month_revenue }}"
         >
             <td class="router-name">{{ rid }}</td>
             <td class="paid-col {% if paid == 0 %}zero{% endif %}">{{ paid }}</td>
             <td class="rev-col {% if rev == 0 %}zero{% endif %}">
                 {% if rev > 0 %}{{ "{:,}".format(rev) }}{% else %}—{% endif %}
             </td>
-            {# Колонки по тарифам #}
             {% for t in tariffs %}
             {% set amount_key = t.amount | string %}
             {% set fp_item = fp.by_tariff.get(amount_key, {}) %}
@@ -337,26 +449,27 @@
 </div>
 
 <script>
-function formatCount(value) {
-    return value > 0 ? String(value) : '—';
+const _ADMIN_TOKEN = {{ request.query_params.get('token', '') | tojson }};
+const TARIFF_AMOUNTS = [{% for t in tariffs %}{{ t.amount }}{% if not loop.last %}, {% endif %}{% endfor %}];
+
+// ── Форматирование ──────────────────────────────────────────
+function fmtCount(v) { return v > 0 ? String(v) : '—'; }
+function fmtMoney(v) { return v > 0 ? v.toLocaleString('ru-RU') : '—'; }
+function fmtDate(s) {
+    const [y, m, d] = s.split('-');
+    return `${d}.${m}.${y}`;
 }
 
-function formatMoney(value) {
-    return value > 0 ? value.toLocaleString('ru-RU') : '—';
-}
-
+// ── Рендер ячейки тарифа (предзагруженные данные) ──────────
 function renderTariffCell(cell, period) {
     const total = parseInt(cell.dataset[period] ?? cell.dataset.total ?? '0', 10) || 0;
-    const fp = parseInt(cell.dataset[period + 'Fp'] ?? cell.dataset.totalFp ?? '0', 10) || 0;
-    const ka = parseInt(cell.dataset[period + 'Ka'] ?? cell.dataset.totalKa ?? '0', 10) || 0;
+    const fp    = parseInt(cell.dataset[period + 'Fp'] ?? cell.dataset.totalFp ?? '0', 10) || 0;
+    const ka    = parseInt(cell.dataset[period + 'Ka'] ?? cell.dataset.totalKa ?? '0', 10) || 0;
     cell.className = 'tariff-col' + (total === 0 ? ' zero' : '');
     if (total > 0) {
         let html = String(total);
         if (fp > 0 && ka > 0) {
-            html += '<div class="tariff-detail">'
-                + '<span class="tariff-item">FP:' + fp + '</span>'
-                + '<span class="tariff-item">K:' + ka + '</span>'
-                + '</div>';
+            html += `<div class="tariff-detail"><span class="tariff-item">FP:${fp}</span><span class="tariff-item">K:${ka}</span></div>`;
         }
         cell.innerHTML = html;
     } else {
@@ -365,91 +478,183 @@ function renderTariffCell(cell, period) {
     return total;
 }
 
+// ── Обновление сводных карточек ────────────────────────────
+function _updateCards(paid, rev, fp, ka, fpRev, kaRev, tr) {
+    document.getElementById('card-total-paid').textContent = paid;
+    document.getElementById('card-total-paid-sub').textContent = `FP: ${fp} / Kaspi: ${ka}`;
+    document.getElementById('card-total-rev').textContent = (rev > 0 ? rev.toLocaleString('ru-RU') : '0') + ' ₸';
+    document.getElementById('card-total-rev-sub').textContent =
+        `FP: ${fpRev > 0 ? fpRev.toLocaleString('ru-RU') : '0'} · K: ${kaRev > 0 ? kaRev.toLocaleString('ru-RU') : '0'}`;
+    document.getElementById('card-total-tr').textContent = tr;
+}
+
+// ── Обновление итоговой строки таблицы ─────────────────────
+function _updateFooter(paid, rev, fp, ka, tr, tariffTotals) {
+    const q = s => document.querySelector(s);
+    q('tfoot .footer-paid').textContent = paid;
+    q('tfoot .footer-rev').textContent  = fmtMoney(rev);
+    q('tfoot .footer-fp').innerHTML  = fp > 0 ? `<span class="badge badge-fp">${fp}</span>` : '<span class="zero">—</span>';
+    q('tfoot .footer-ka').innerHTML  = ka > 0 ? `<span class="badge badge-k">${ka}</span>`  : '<span class="zero">—</span>';
+    q('tfoot .footer-tr').innerHTML  = tr > 0 ? `<span class="badge badge-tr">${tr}</span>` : '<span class="zero">—</span>';
+    document.querySelectorAll('tfoot .footer-tariff').forEach((cell, idx) => {
+        const v = tariffTotals[idx] || 0;
+        cell.textContent = v > 0 ? v : '—';
+    });
+}
+
+// ── Переключение предустановленных периодов ─────────────────
 function switchPeriod(period, btn) {
     document.querySelectorAll('.period-tabs button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
 
-    let totalPaid = 0;
-    let totalRev = 0;
-    let totalFp = 0;
-    let totalKa = 0;
-    let totalTr = 0;
-    const tariffTotals = new Array(document.querySelectorAll('thead th').length).fill(0);
+    // Снимаем активное состояние с кастомного диапазона
+    document.getElementById('custom-range').classList.remove('range-active');
+    document.getElementById('range-badge').style.display = 'none';
 
-    const rows = document.querySelectorAll('tbody tr');
-    rows.forEach(row => {
-        const paid = parseInt(row.dataset[period + 'Paid'] ?? row.dataset.totalPaid ?? '0', 10) || 0;
-        const rev  = parseInt(row.dataset[period + 'Rev']  ?? row.dataset.totalRev ?? '0', 10) || 0;
-        const fp   = parseInt(row.dataset[period + 'Fp']    ?? row.dataset.totalFp ?? '0', 10) || 0;
-        const ka   = parseInt(row.dataset[period + 'Ka']    ?? row.dataset.totalKa ?? '0', 10) || 0;
-        const tr   = parseInt(row.dataset[period + 'Tr']    ?? row.dataset.totalTr ?? '0', 10) || 0;
+    let totalPaid = 0, totalRev = 0, totalFp = 0, totalKa = 0, totalTr = 0;
+    let totalFpRev = 0, totalKaRev = 0;
+    const tariffTotals = new Array(TARIFF_AMOUNTS.length).fill(0);
 
-        totalPaid += paid;
-        totalRev += rev;
-        totalFp += fp;
-        totalKa += ka;
-        totalTr += tr;
+    document.querySelectorAll('tbody tr').forEach(row => {
+        const paid  = parseInt(row.dataset[period + 'Paid']  ?? row.dataset.totalPaid  ?? '0', 10) || 0;
+        const rev   = parseInt(row.dataset[period + 'Rev']   ?? row.dataset.totalRev   ?? '0', 10) || 0;
+        const fp    = parseInt(row.dataset[period + 'Fp']    ?? row.dataset.totalFp    ?? '0', 10) || 0;
+        const ka    = parseInt(row.dataset[period + 'Ka']    ?? row.dataset.totalKa    ?? '0', 10) || 0;
+        const tr    = parseInt(row.dataset[period + 'Tr']    ?? row.dataset.totalTr    ?? '0', 10) || 0;
+        const fpRev = parseInt(row.dataset[period + 'FpRev'] ?? row.dataset.totalFpRev ?? '0', 10) || 0;
+        const kaRev = parseInt(row.dataset[period + 'KaRev'] ?? row.dataset.totalKaRev ?? '0', 10) || 0;
+
+        totalPaid += paid; totalRev += rev;
+        totalFp   += fp;   totalKa  += ka;
+        totalTr   += tr;   totalFpRev += fpRev; totalKaRev += kaRev;
 
         const paidCell = row.querySelector('.paid-col');
         const revCell  = row.querySelector('.rev-col');
-        const fpCell   = row.querySelector('.fp-col');
-        const kaCell   = row.querySelector('.ka-col');
-        const trCell   = row.querySelector('.tr-col');
+        paidCell.textContent = fmtCount(paid);
+        paidCell.className   = 'paid-col' + (paid === 0 ? ' zero' : '');
+        revCell.textContent  = fmtMoney(rev);
+        revCell.className    = 'rev-col'  + (rev  === 0 ? ' zero' : '');
 
-        if (paidCell) {
-            paidCell.textContent = formatCount(paid);
-            paidCell.className = 'paid-col' + (paid === 0 ? ' zero' : '');
-        }
-        if (revCell) {
-            revCell.textContent = formatMoney(rev);
-            revCell.className = 'rev-col' + (rev === 0 ? ' zero' : '');
-        }
-        if (fpCell) {
-            fpCell.innerHTML = fp > 0 ? '<span class="badge badge-fp">' + fp + '</span>' : '<span class="zero">—</span>';
-        }
-        if (kaCell) {
-            kaCell.innerHTML = ka > 0 ? '<span class="badge badge-k">' + ka + '</span>' : '<span class="zero">—</span>';
-        }
-        if (trCell) {
-            trCell.innerHTML = tr > 0 ? '<span class="badge badge-tr">' + tr + '</span>' : '<span class="zero">—</span>';
-        }
+        row.querySelector('.fp-col').innerHTML = fp > 0 ? `<span class="badge badge-fp">${fp}</span>` : '<span class="zero">—</span>';
+        row.querySelector('.ka-col').innerHTML = ka > 0 ? `<span class="badge badge-k">${ka}</span>`  : '<span class="zero">—</span>';
+        row.querySelector('.tr-col').innerHTML = tr > 0 ? `<span class="badge badge-tr">${tr}</span>` : '<span class="zero">—</span>';
 
-        row.querySelectorAll('td.tariff-col').forEach((cell, index) => {
-            const tariffTotal = renderTariffCell(cell, period);
-            if (tariffTotals[index] !== undefined) {
-                tariffTotals[index] += tariffTotal;
+        row.querySelectorAll('td.tariff-col').forEach((cell, idx) => {
+            tariffTotals[idx] += renderTariffCell(cell, period);
+        });
+    });
+
+    _updateCards(totalPaid, totalRev, totalFp, totalKa, totalFpRev, totalKaRev, totalTr);
+    _updateFooter(totalPaid, totalRev, totalFp, totalKa, totalTr, tariffTotals);
+}
+
+// ── Применение кастомного диапазона ────────────────────────
+async function applyCustomRange() {
+    const from = document.getElementById('date-from').value;
+    const to   = document.getElementById('date-to').value;
+    if (!from || !to) {
+        alert('Выберите обе даты');
+        return;
+    }
+
+    const btn     = document.getElementById('btn-apply');
+    const spinner = document.getElementById('range-spinner');
+    btn.disabled          = true;
+    spinner.style.display = 'inline';
+
+    try {
+        const headers = {};
+        if (_ADMIN_TOKEN) headers['X-Admin-Token'] = _ADMIN_TOKEN;
+
+        const resp = await fetch(`/api/admin/stats/range?from_date=${from}&to_date=${to}`, { headers });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            alert('Ошибка: ' + (err.error || `HTTP ${resp.status}`));
+            return;
+        }
+        const data = await resp.json();
+        _applyRangeData(data);
+
+        // Активируем кастомный диапазон, снимаем период-таб
+        document.querySelectorAll('.period-tabs button').forEach(b => b.classList.remove('active'));
+        document.getElementById('custom-range').classList.add('range-active');
+        const badge = document.getElementById('range-badge');
+        badge.textContent  = from === to ? fmtDate(from) : `${fmtDate(from)} — ${fmtDate(to)}`;
+        badge.style.display = 'inline';
+    } catch (e) {
+        alert('Ошибка запроса: ' + e.message);
+    } finally {
+        btn.disabled          = false;
+        spinner.style.display = 'none';
+    }
+}
+
+// ── Обновление таблицы данными из API диапазона ─────────────
+function _applyRangeData(data) {
+    const routers = data.routers || {};
+    const totals  = data.totals  || {};
+
+    let footerPaid = 0, footerRev = 0, footerFp = 0, footerKa = 0, footerTr = 0;
+    const tariffTotals = new Array(TARIFF_AMOUNTS.length).fill(0);
+
+    document.querySelectorAll('tbody tr').forEach(row => {
+        const rid = row.querySelector('.router-name')?.textContent.trim() || '';
+        const rd  = routers[rid] || {};
+        const paid = rd.paid    || 0;
+        const rev  = rd.revenue || 0;
+        const fp   = rd.fp      || 0;
+        const ka   = rd.ka      || 0;
+        const tr   = rd.trial   || 0;
+
+        footerPaid += paid; footerRev += rev;
+        footerFp   += fp;   footerKa  += ka; footerTr += tr;
+
+        const paidCell = row.querySelector('.paid-col');
+        const revCell  = row.querySelector('.rev-col');
+        paidCell.textContent = fmtCount(paid);
+        paidCell.className   = 'paid-col' + (paid === 0 ? ' zero' : '');
+        revCell.textContent  = fmtMoney(rev);
+        revCell.className    = 'rev-col'  + (rev  === 0 ? ' zero' : '');
+
+        row.querySelector('.fp-col').innerHTML = fp > 0 ? `<span class="badge badge-fp">${fp}</span>` : '<span class="zero">—</span>';
+        row.querySelector('.ka-col').innerHTML = ka > 0 ? `<span class="badge badge-k">${ka}</span>`  : '<span class="zero">—</span>';
+        row.querySelector('.tr-col').innerHTML = tr > 0 ? `<span class="badge badge-tr">${tr}</span>` : '<span class="zero">—</span>';
+
+        row.querySelectorAll('td.tariff-col').forEach((cell, colIdx) => {
+            const key  = String(TARIFF_AMOUNTS[colIdx]);
+            const td   = (rd.by_tariff && rd.by_tariff[key]) || {};
+            const cnt  = td.count || 0;
+            const fpC  = td.fp    || 0;
+            const kaC  = td.ka    || 0;
+            tariffTotals[colIdx] += cnt;
+            cell.className = 'tariff-col' + (cnt === 0 ? ' zero' : '');
+            if (cnt > 0) {
+                let html = String(cnt);
+                if (fpC > 0 && kaC > 0) {
+                    html += `<div class="tariff-detail"><span class="tariff-item">FP:${fpC}</span><span class="tariff-item">K:${kaC}</span></div>`;
+                }
+                cell.innerHTML = html;
+            } else {
+                cell.textContent = '—';
             }
         });
     });
 
-    const footerPaid = document.querySelector('tfoot .footer-paid');
-    const footerRev = document.querySelector('tfoot .footer-rev');
-    const footerFp = document.querySelector('tfoot .footer-fp');
-    const footerKa = document.querySelector('tfoot .footer-ka');
-    const footerTr = document.querySelector('tfoot .footer-tr');
-
-    if (footerPaid) footerPaid.textContent = totalPaid;
-    if (footerRev) footerRev.textContent = totalRev > 0 ? totalRev.toLocaleString('ru-RU') : '—';
-    if (footerFp) footerFp.innerHTML = totalFp > 0 ? '<span class="badge badge-fp">' + totalFp + '</span>' : '<span class="zero">—</span>';
-    if (footerKa) footerKa.innerHTML = totalKa > 0 ? '<span class="badge badge-k">' + totalKa + '</span>' : '<span class="zero">—</span>';
-    if (footerTr) footerTr.innerHTML = totalTr > 0 ? '<span class="badge badge-tr">' + totalTr + '</span>' : '<span class="zero">—</span>';
-
-    const cardPaid = document.getElementById('card-total-paid');
-    const cardPaidSub = document.getElementById('card-total-paid-sub');
-    const cardRev = document.getElementById('card-total-rev');
-    const cardRevSub = document.getElementById('card-total-rev-sub');
-    const cardTr = document.getElementById('card-total-tr');
-    if (cardPaid) cardPaid.textContent = totalPaid;
-    if (cardPaidSub) cardPaidSub.textContent = 'FP: ' + totalFp + ' / Kaspi: ' + totalKa;
-    if (cardRev) cardRev.textContent = totalRev > 0 ? totalRev.toLocaleString('ru-RU') + ' ₸' : '0 ₸';
-    if (cardRevSub) cardRevSub.textContent = '';
-    if (cardTr) cardTr.textContent = totalTr;
-
-    document.querySelectorAll('tfoot .footer-tariff').forEach((cell, index) => {
-        const value = tariffTotals[index] || 0;
-        cell.textContent = value > 0 ? value : '—';
-    });
+    _updateCards(
+        totals.total_paid         || 0,
+        totals.total_revenue      || 0,
+        totals.freedompay_paid    || 0,
+        totals.kaspi_paid         || 0,
+        totals.freedompay_revenue || 0,
+        totals.kaspi_revenue      || 0,
+        totals.trial_total        || 0,
+    );
+    _updateFooter(footerPaid, footerRev, footerFp, footerKa, footerTr, tariffTotals);
 }
+
+// ── Клавиша Enter в полях дат ───────────────────────────────
+document.getElementById('date-from').addEventListener('keydown', e => { if (e.key === 'Enter') applyCustomRange(); });
+document.getElementById('date-to').addEventListener('keydown',   e => { if (e.key === 'Enter') applyCustomRange(); });
 </script>
 </body>
 </html>
