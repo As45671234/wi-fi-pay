@@ -75,9 +75,9 @@ def add_walled_garden(config: dict, vps_ip: str) -> bool:
             print("ОШИБКА: walled-garden-ip не поддерживается")
             return False
 
-        # Проверяем, нет ли уже такой записи
+        # Проверяем, нет ли уже такой записи (проверяем по IP, игнорируя /32)
         existing = wg.get()
-        if any(e.get('dst-address') == f"{vps_ip}/32" for e in existing):
+        if any(e.get('dst-address', '').split('/')[0] == vps_ip for e in existing):
             print("уже есть ✓")
             return True
 
