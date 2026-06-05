@@ -293,14 +293,12 @@ function syncFromServer() {
         });
 }
 
-// Немедленная синхронизация при загрузке, чтобы убрать скачок "24ч -> 1мин".
-syncFromServer();
-
-// Серверный поллинг каждые 30 сек — синхронизирует таймер с сервером.
-// Если сервер говорит "expired" раньше клиентского таймера — форсируем истечение.
-setInterval(function() {
+// Для restore — не синкаемся с сервером: restore не создаёт запись в orders,
+// сервер вернёт "no session" и форсирует expire раньше времени.
+if (PAYMENT_METHOD !== 'restore') {
     syncFromServer();
-}, 30000);
+    setInterval(function() { syncFromServer(); }, 30000);
+}
 </script>
 </body>
 </html>

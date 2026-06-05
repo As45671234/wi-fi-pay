@@ -243,8 +243,7 @@
             autocomplete="tel"
             style="width:100%;box-sizing:border-box;padding:0.9rem 1rem;border:2px solid #e5e7eb;border-radius:1rem;font-size:1.1rem;color:#111827;outline:none;margin-bottom:1rem;letter-spacing:0.02em;"
         >
-        <button id="modal-submit" style="width:100%;background:#1c75ff;color:#fff;border:none;border-radius:1rem;padding:1rem;font-size:1rem;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(28,117,255,0.25);margin-bottom:0.6rem;">Продолжить к оплате</button>
-        <a id="modal-skip" href="#" style="display:block;text-align:center;color:#9ca3af;font-size:0.85rem;text-decoration:none;padding:0.4rem 0;">Пропустить</a>
+        <button id="modal-submit" style="width:100%;background:#1c75ff;color:#fff;border:none;border-radius:1rem;padding:1rem;font-size:1rem;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(28,117,255,0.25);">Продолжить к оплате</button>
     </div>
 </div>
 
@@ -308,7 +307,6 @@ const cardPayBtn = document.getElementById('card-pay-btn');
 const modal = document.getElementById('phone-modal');
 const phoneInput = document.getElementById('modal-phone');
 const modalSubmit = document.getElementById('modal-submit');
-const modalSkip = document.getElementById('modal-skip');
 const modalClose = document.getElementById('modal-close');
 
 applyPhoneMask(phoneInput);
@@ -324,12 +322,6 @@ function closeModal() { modal.style.display = 'none'; }
 
 modalClose.addEventListener('click', closeModal);
 modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
-
-modalSkip.addEventListener('click', function(e) {
-    e.preventDefault();
-    closeModal();
-    window.location.href = buildPayUrl('');
-});
 
 modalSubmit.addEventListener('click', function() {
     const digits = extractDigits(phoneInput.value);
