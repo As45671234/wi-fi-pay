@@ -325,15 +325,20 @@ function extractDigits(masked) {
 
 // ── Модальное окно ──────────────────────────────────────────────────────────
 var cardPayBtn  = document.getElementById('card-pay-btn');
+var kaspiBtn    = document.getElementById('kaspiBtn');
 var modal       = document.getElementById('phone-modal');
 var phoneInput  = document.getElementById('modal-phone');
 var modalSubmit = document.getElementById('modal-submit');
 var modalClose  = document.getElementById('modal-close');
 var phoneError  = document.getElementById('modal-phone-error');
 
+// 'card' или 'kaspi' — запоминаем что нажал юзер
+var pendingPayType = 'card';
+
 applyPhoneMask(phoneInput);
 
-function openModal() {
+function openModal(type) {
+    pendingPayType = type;
     phoneInput.value = '+7 ';
     phoneError.style.display = 'none';
     phoneInput.style.borderColor = '#e5e7eb';
@@ -346,9 +351,17 @@ function closeModal() {
 
 cardPayBtn.onclick = function(e) {
     e.preventDefault();
-    openModal();
+    openModal('card');
     return false;
 };
+
+if (kaspiBtn) {
+    kaspiBtn.onclick = function(e) {
+        e.preventDefault();
+        openModal('kaspi');
+        return false;
+    };
+}
 
 modalClose.onclick = function() { closeModal(); };
 
@@ -365,7 +378,36 @@ modalSubmit.onclick = function() {
         return;
     }
     closeModal();
-    window.location.href = buildPayUrl(digits);
+
+    if (pendingPayType === 'card') {
+        window.location.href = buildPayUrl(digits);
+        return;
+    }
+
+    // Kaspi — создаём заказ и редиректим
+    if (kaspiBtn) {
+        kaspiBtn.disabled = true;
+        kaspiBtn.textContent = 'Создаём заказ...';
+    }
+    fetch('/api/kaspi/create_order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amount, mac: mac, router_id: routerId, cid: cid, phone: digits })
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (!data.ok || !data.contract_number) {
+            throw new Error((data && data.error) ? data.error : 'Ошибка создания заказа');
+        }
+        window.location.href = 'https://kaspi.kz/pay/Buslink?19626=' + encodeURIComponent(data.contract_number);
+    })
+    .catch(function(err) {
+        if (kaspiBtn) {
+            kaspiBtn.disabled = false;
+            kaspiBtn.textContent = 'Попробуйте ещё раз';
+        }
+        alert('Не удалось создать заказ. Попробуйте ещё раз.');
+    });
 };
 
 phoneInput.oninput = function() {
@@ -376,31 +418,6 @@ phoneInput.oninput = function() {
 phoneInput.onkeydown = function(e) {
     if (e.key === 'Enter') modalSubmit.onclick();
 };
-
-const kaspiBtn = document.getElementById('kaspiBtn');
-if (kaspiBtn) {
-    kaspiBtn.addEventListener('click', async function () {
-        kaspiBtn.disabled = true;
-        kaspiBtn.textContent = 'Создаём заказ...';
-
-        try {
-            const resp = await fetch('/api/kaspi/create_order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount, mac, router_id: routerId, cid })
-            });
-            const data = await resp.json();
-            if (!resp.ok || !data.ok || !data.contract_number) {
-                throw new Error((data && data.error) ? data.error : 'Ошибка создания заказа');
-            }
-            window.location.href = `https://kaspi.kz/pay/Buslink?19626=${encodeURIComponent(data.contract_number)}`;
-        } catch (err) {
-            kaspiBtn.disabled = false;
-            kaspiBtn.innerHTML = `<svg width="113" height="28" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.52 0C6.764 0 .5 6.247.5 13.904c0 4.647 2.33 8.8 5.844 11.314.077-.114.153-.381.23-.648v-.114c.343-1.486.42-2.895.267-4.571a11.534 11.534 0 00-.42-2.134c-.153-.57-.268-1.066-.268-1.828 0-.686.153-1.18.306-1.676.191-.572.382-1.257.42-2.4.077-2.21.306-2.78.955-3.428.65-.648.879-.915.879-1.372a2 2 0 00-.063-.383c-.124-.554-.316-1.419.521-2.283.764-.686 1.452-.953 1.948-.953.268 0 .497.077.612.229.343.38.267 1.067-.459 2.019-.687.952-.687 1.371-.65 1.6.039.228.268.533.688.838.057.05.116.099.177.15.265.22.553.46.74.802.363.633.582 1.242.847 1.979.07.194.143.397.223.612l.114.304c.306.915 1.184 1.22 2.674 1.22s3.094-.991 3.094-1.753c0-.396-.082-.607-.162-.81a1.633 1.633 0 01-.143-.676c0-.647.955-2.514 2.406-2.514.726 0 1.146.534.764 1.295-.113.24-.269.516-.426.796-.318.567-.643 1.146-.643 1.452 0 .838 1.26.19 2.063-.457.802-.648.993-.838 1.566-1.829.344-.61.84-.724 1.146-.571.343.19.573.724.267 1.447-.267.572-.955 1.334-1.68 2.134l-.186.206c-.907 1.01-1.878 2.09-1.878 2.803 0 3.886 2.216 7.314 2.445 7.657.23.38.382.495.459.533a13.688 13.688 0 003.323-8.952v-.114C28.5 6.209 22.235 0 14.52 0zm4.315 26.781c-.115.267-.459.533-.917.762A16.991 16.991 0 0114.48 28h-.382c-.497-.152-.84-.38-1.031-.686-.573-.99-.612-3.161-.612-5.714v-1.007c-.001-2.431-.002-4.508.917-5.278.344-.305.879-.419 1.566-.305 2.674.381 2.903 2.02 3.094 3.467l.039.152.152.8.063.426c.247 1.662.663 4.476.663 6.012 0 .419-.038.724-.114.914zm-9.396-6.477c.535 0 .878 2.667.955 4.724.076 1.447-.077 2.019-.344 2.247-.134-.057-.267-.105-.401-.152-.134-.048-.268-.096-.401-.153-.153-.343-.306-.838-.382-1.485-.23-2.057 0-5.143.573-5.181zm11.46.305c.918-.419 2.56 3.276 2.407 3.924-.012.05-.03.101-.046.152-.034.102-.068.203-.068.305a13.83 13.83 0 01-1.566 1.029c-.191.038-.344 0-.42-.115-.726-1.18-.994-4.952-.306-5.295zM112.5 18.893h-4.543l4.428-5.828v-1.676h-7.084l-1.848 2.361h5.005l-4.428 5.79v1.715h8.47v-2.362zm-30.607 2.362h3.118v-9.828h-3.118v9.828zm-6.545-7.657c1.04 0 1.54.876 1.54 2.628h.038v.381c-.038 1.677-.538 2.515-1.54 2.515-.73 0-1.231-.305-1.5-.838v-3.886c.23-.533.73-.8 1.462-.8zm3.58 6.476c.694-.914 1.04-2.133 1.04-3.657h-.038v-.152c0-1.562-.347-2.781-1.04-3.696-.654-.876-1.617-1.333-2.849-1.333-.962 0-1.77.381-2.348 1.105l-.077-.914h-2.888v14.018h3.119v-4.99c.616.647 1.347.99 2.271.99 1.155 0 2.118-.457 2.81-1.371zm-13.474-2.21c.27.19.423.381.423.648s-.077.495-.308.571c-.23.19-.539.267-.962.267-.462 0-.809-.114-1.117-.305-.308-.19-.462-.533-.462-.99h-2.887c0 .571.192 1.105.577 1.638.385.533.924.952 1.579 1.257.654.305 1.424.457 2.271.457 1.31 0 2.349-.267 3.157-.838.809-.571 1.194-1.295 1.194-2.21 0-1.333-.732-2.247-2.233-2.742-.462-.152-1.001-.267-1.579-.381-.616-.114-1.04-.267-1.309-.419-.27-.152-.423-.381-.423-.648 0-.266.115-.495.346-.685.193-.19.5-.267.809-.267.847 0 1.27.381 1.27 1.181h3.042c0-.952-.385-1.752-1.194-2.324-.77-.571-1.848-.876-3.157-.876-1.232 0-2.194.305-2.964.876-.732.61-1.117 1.334-1.117 2.248 0 .533.116.99.385 1.371.27.381.655.724 1.155.99.5.305 1.155.534 1.925.686.77.19 1.31.343 1.579.495zm-10.55 1.181c-.269.153-.577.229-.962.229-.308 0-.539-.114-.731-.229a.913.913 0 01-.27-.685c0-.953.54-1.448 1.617-1.448h.886v1.562a1.28 1.28 0 01-.54.571zm.753 1.533c.086.288.154.52.249.677v.038h3.08v-.152c-.27-.496-.424-1.181-.424-2.096v-4.457c0-1.066-.385-1.904-1.116-2.514-.732-.61-1.694-.914-3.003-.914-1.31 0-2.349.267-3.157.876-.809.61-1.232 1.372-1.232 2.324h3.118c0-.724.385-1.067 1.117-1.067.808 0 1.193.457 1.193 1.372v.533h-.962c-1.54 0-2.695.305-3.504.838-.808.571-1.193 1.371-1.193 2.438 0 .876.346 1.562 1 2.133.655.572 1.464.838 2.388.838 1 0 1.81-.343 2.387-1.066l.06.199zM41.2 18.169l1.117-1.524 3.08 4.61h3.85l-4.89-7.276 5.236-6.743h-4.004l-4.389 5.753V7.236h-3.234v14.019H41.2v-3.086zm49.434 1.64c0 .877-.732 1.6-1.617 1.6-.924 0-1.656-.723-1.656-1.6 0-.914.77-1.6 1.656-1.6.885 0 1.617.725 1.617 1.6zm-7.237-9.333c.885 0 1.617-.724 1.617-1.6 0-.876-.732-1.6-1.617-1.6s-1.617.724-1.617 1.6c0 .876.732 1.6 1.617 1.6zm13.089 8.76l1-1.257 2.195 3.238 3.388.038-3.734-5.6 3.272-4.266H99.18l-2.695 3.504V7.236h-3.119v14.019h3.119v-2.02z" fill="#fff"/></svg>`;
-            alert('Не удалось создать заказ. Попробуйте ещё раз.');
-        }
-    });
-}
 </script>
 </body>
 </html>

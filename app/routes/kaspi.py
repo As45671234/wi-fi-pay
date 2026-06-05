@@ -66,6 +66,8 @@ async def create_kaspi_order(payload: KaspiCreateOrderRequest):
     contract_number = make_contract_number(mac)
     local_order_id = f"kaspi_{int(time.time() * 1000)}"
     minutes = int(amount_to_minutes.get(amount, 60))
+    from ..utils import _normalize_phone
+    phone_norm = _normalize_phone(payload.phone) or None
 
     conn = get_db()
     try:
@@ -74,8 +76,8 @@ async def create_kaspi_order(payload: KaspiCreateOrderRequest):
             INSERT INTO kaspi_orders (
                 local_order_id, contract_number, external_order_ref,
                 mac_address, router_id, amount, minutes, kaspi_status, is_activated,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                phone, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(contract_number) DO UPDATE SET
                 local_order_id = excluded.local_order_id,
                 external_order_ref = excluded.external_order_ref,
@@ -86,12 +88,13 @@ async def create_kaspi_order(payload: KaspiCreateOrderRequest):
                 is_activated = 0,
                 kaspi_order_id = NULL,
                 paid_at = NULL,
+                phone = COALESCE(excluded.phone, phone),
                 activation_lock = 0,
                 activation_attempts = 0,
                 last_activation_attempt_at = NULL,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (local_order_id, contract_number, contract_number, mac, router_id, amount, minutes, "CREATED"),
+            (local_order_id, contract_number, contract_number, mac, router_id, amount, minutes, "CREATED", phone_norm),
         )
         conn.commit()
     finally:

@@ -32,6 +32,7 @@ class KaspiCreateOrderRequest(BaseModel):
     mac: str
     router_id: str = "astana_01"
     cid: str = ""
+    phone: str = ""
 
 
 class KaspiStatusResponse(BaseModel):
