@@ -107,7 +107,7 @@
             required
         >
 
-        <button class="btn" type="submit">Получить доступ</button>
+        <button class="btn" type="submit" id="submit-btn">Получить доступ</button>
     </form>
 
     <a class="back-link" href="/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">
@@ -116,5 +116,42 @@
 
     <div class="meta">{{ mac }} | {{ router_id }}</div>
 </div>
+<script>
+'use strict';
+const phoneInput = document.getElementById('phone');
+const form = phoneInput.closest('form');
+
+phoneInput.addEventListener('focus', function() {
+    if (!this.value) this.value = '+7 ';
+});
+
+phoneInput.addEventListener('input', function() {
+    let digits = this.value.replace(/\D/g, '');
+    if (digits.startsWith('8') && digits.length > 1) digits = '7' + digits.slice(1);
+    if (!digits.startsWith('7')) digits = '7' + digits.replace(/^7*/, '');
+    digits = digits.slice(0, 11);
+    let body = digits.slice(1);
+    let out = '+7';
+    if (body.length > 0) out += ' ' + body.slice(0, 3);
+    if (body.length > 3) out += ' ' + body.slice(3, 6);
+    if (body.length > 6) out += ' ' + body.slice(6, 8);
+    if (body.length > 8) out += ' ' + body.slice(8, 10);
+    this.value = out;
+    this.style.borderColor = '#e5e7eb';
+});
+
+phoneInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Backspace' && this.value === '+7 ') e.preventDefault();
+});
+
+form.addEventListener('submit', function(e) {
+    const digits = phoneInput.value.replace(/\D/g, '');
+    if (digits.length < 11) {
+        e.preventDefault();
+        phoneInput.style.borderColor = '#ef4444';
+        phoneInput.focus();
+    }
+});
+</script>
 </body>
 </html>
