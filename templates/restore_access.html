@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Восстановить доступ - Wi-Fi Pay</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #1f2937;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 2rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            padding: 2rem;
+            width: 88%;
+            max-width: 420px;
+            border: 1px solid #f1f5f9;
+        }
+        .icon { text-align: center; margin-bottom: 0.75rem; font-size: 2.5rem; }
+        h1 { font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: #111827; text-align: center; }
+        .desc { color: #6b7280; font-size: 0.88rem; margin: 0 0 1.5rem 0; line-height: 1.5; text-align: center; }
+        .error-box {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 0.8rem;
+            padding: 0.8rem 1rem;
+            margin-bottom: 1.2rem;
+            color: #b91c1c;
+            font-size: 0.88rem;
+            font-weight: 600;
+        }
+        label { display: block; font-size: 0.85rem; font-weight: 600; color: #374151; margin-bottom: 0.4rem; }
+        input[type="tel"] {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 0.85rem 1rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 0.9rem;
+            font-size: 1.05rem;
+            color: #111827;
+            outline: none;
+            transition: border-color 0.2s;
+            margin-bottom: 1.2rem;
+        }
+        input[type="tel"]:focus { border-color: #3b82f6; }
+        .btn {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            background-color: #1c75ff;
+            color: #fff;
+            border: none;
+            border-radius: 1rem;
+            padding: 1rem;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(28,117,255,0.25);
+            text-align: center;
+        }
+        .btn:active { opacity: 0.88; }
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 1.2rem;
+            color: #6b7280;
+            font-size: 0.85rem;
+            text-decoration: none;
+        }
+        .meta { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 1.2rem; text-align: center; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="icon">📱</div>
+    <h1>Восстановить доступ</h1>
+    <p class="desc">Введите номер телефона, который использовали при оплате. Доступ будет применён к вашему текущему устройству.</p>
+
+    {% if error %}
+    <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    <form action="/api/restore_access" method="POST">
+        <input type="hidden" name="mac" value="{{ mac }}">
+        <input type="hidden" name="router_id" value="{{ router_id }}">
+        <input type="hidden" name="cid" value="{{ cid }}">
+
+        <label for="phone">Номер телефона</label>
+        <input
+            type="tel"
+            id="phone"
+            name="phone"
+            placeholder="+7 777 000 00 00"
+            autocomplete="tel"
+            inputmode="tel"
+            required
+        >
+
+        <button class="btn" type="submit">Получить доступ</button>
+    </form>
+
+    <a class="back-link" href="/tariffs?mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">
+        ← Вернуться к тарифам
+    </a>
+
+    <div class="meta">{{ mac }} | {{ router_id }}</div>
+</div>
+</body>
+</html>

@@ -465,3 +465,29 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                     connection.disconnect()
                 except Exception:
                     pass
+
+
+def remove_mac_binding(mac: str, router_id: str) -> bool:
+    """Удаляет PAID-биндинг с MikroTik при смене MAC (для one-device constraint)."""
+    config = ROUTERS_CONFIG.get(router_id)
+    if not config:
+        return False
+    connection = None
+    try:
+        connection, api = _make_router_api(config, socket_timeout=5.0)
+        binding = api.get_resource('/ip/hotspot/ip-binding')
+        for b in binding.call('print', queries={'mac-address': mac}):
+            comment = (b.get('comment') or '')
+            if comment.startswith('PAID_'):
+                binding.call('remove', arguments={'.id': b.get('id') or b.get('.id')})
+                logger.info("remove_mac_binding: удалён %s для %s*** router=%s", comment, mac[:8], router_id)
+        return True
+    except Exception as e:
+        logger.error("remove_mac_binding error mac=%s*** router=%s: %s", mac[:8], router_id, str(e)[:150])
+        return False
+    finally:
+        if connection:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass

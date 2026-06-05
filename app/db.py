@@ -147,6 +147,25 @@ def init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_activations_status ON pending_activations(status, router_id, created_at DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_activations_retry ON pending_activations(status, next_retry_at, created_at)")
 
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS phone_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone TEXT NOT NULL,
+            mac_address TEXT NOT NULL,
+            router_id TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(phone)
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_phone_sessions_phone ON phone_sessions(phone)")
+
+    cursor.execute("PRAGMA table_info(orders)")
+    o_columns = {row[1] for row in cursor.fetchall()}
+    if 'phone' not in o_columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN phone TEXT")
+
     cursor.execute("PRAGMA table_info(kaspi_orders)")
     k_columns = {row[1] for row in cursor.fetchall()}
     if 'external_order_ref' not in k_columns:

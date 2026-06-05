@@ -215,7 +215,17 @@
     <div class="option">
         <p class="option-title">Оплата картой</p>
         <p class="option-desc">Оплата картой любого банка через FreedomPay.</p>
-        <a class="btn btn-freedom" href="/start_payment?amount={{ amount }}&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оплатить картой</a>
+        <div style="margin-bottom: 0.7rem;">
+            <input
+                type="tel"
+                id="card-phone"
+                placeholder="Телефон для восстановления (необязательно)"
+                autocomplete="tel"
+                inputmode="tel"
+                style="width:100%;box-sizing:border-box;padding:0.65rem 0.85rem;border:1px solid #e5e7eb;border-radius:0.75rem;font-size:0.88rem;color:#374151;outline:none;"
+            >
+        </div>
+        <a class="btn btn-freedom" id="card-pay-btn" href="/start_payment?amount={{ amount }}&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оплатить картой</a>
     </div>
 
     <div class="actions">
@@ -235,6 +245,19 @@ const cid = "{{ cid }}";
 
 // PAY_WINDOW создаётся синхронно в /start_payment перед редиректом на FreedomPay.
 // Fire-and-forget здесь убран: он мог гоняться с /start_payment и удалять биндинг.
+
+const cardPayBtn = document.getElementById('card-pay-btn');
+if (cardPayBtn) {
+    cardPayBtn.addEventListener('click', function(e) {
+        const phoneVal = (document.getElementById('card-phone').value || '').trim();
+        if (phoneVal) {
+            e.preventDefault();
+            const base = `/start_payment?amount=${amount}&mac=${encodeURIComponent(mac)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}&phone=${encodeURIComponent(phoneVal)}`;
+            window.location.href = base;
+        }
+        // Если телефон не введён — href уже правильный, браузер переходит без phone
+    });
+}
 
 const kaspiBtn = document.getElementById('kaspiBtn');
 if (kaspiBtn) {

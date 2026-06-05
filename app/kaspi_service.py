@@ -302,6 +302,42 @@ def _claim_kaspi_activation(contract_number: str) -> bool:
             conn.close()
 
 
+def _upsert_phone_session_kaspi(contract_number: str) -> None:
+    """После успешной активации Kaspi-ордера создаём/обновляем phone_sessions."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT phone, mac_address, router_id, minutes, activated_at FROM kaspi_orders WHERE contract_number=? LIMIT 1",
+            (contract_number,),
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        phone, mac, router_id, minutes, activated_at_str = row
+        if not phone or not mac or not router_id:
+            return
+        try:
+            activated_at = datetime.fromisoformat(str(activated_at_str)) if activated_at_str else datetime.utcnow()
+        except Exception:
+            activated_at = datetime.utcnow()
+        expires_at = activated_at + timedelta(minutes=int(minutes or 60))
+        now = datetime.utcnow().isoformat()
+        conn.execute(
+            """INSERT INTO phone_sessions (phone, mac_address, router_id, expires_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(phone) DO UPDATE SET
+                   mac_address=excluded.mac_address,
+                   router_id=excluded.router_id,
+                   updated_at=excluded.updated_at""",
+            (phone, mac, router_id, expires_at.isoformat(), now),
+        )
+        conn.commit()
+        logger.info("[KASPI] phone_session upserted phone=%s*** mac=%s***", phone[:7], mac[:8])
+    except Exception as e:
+        logger.error("[KASPI] phone_session upsert error contract=%s: %s", contract_number, str(e)[:150])
+    finally:
+        conn.close()
+
+
 def _finalize_kaspi_activation(contract_number: str, ok: bool, error_text: str = "") -> None:
     conn = get_db()
     try:
@@ -369,6 +405,7 @@ def _process_kaspi_paid(contract_number: str) -> None:
         ok = _activate_kaspi_order(contract_number)
         if ok:
             _finalize_kaspi_activation(contract_number, ok=True)
+            _upsert_phone_session_kaspi(contract_number)
             logger.info("[KASPI] activation done contract=%s", contract_number)
         else:
             _finalize_kaspi_activation(contract_number, ok=False, error_text="Activation failed")

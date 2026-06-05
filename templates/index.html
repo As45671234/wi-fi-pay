@@ -150,6 +150,12 @@
             <a class="btn" id="main-pay-btn" href="#" target="_blank" rel="noopener noreferrer" onclick="return handlePayClick(event)" style="display: none;">ОПЛАТИТЬ И ПОЛУЧИТЬ ДОСТУП</a>
         </div>
         
+        <div style="text-align:center; margin-top: 1.2rem;">
+            <a id="restore-link" href="#" style="color:#6b7280; font-size:0.82rem; text-decoration:none; border-bottom:1px dashed #d1d5db; padding-bottom:1px;">
+                Уже оплачивали? Восстановить доступ
+            </a>
+        </div>
+
         <div class="mac-id">ID: <span id="mac-value">-</span> | ROUTER: <span id="router-value">-</span></div>
     </div>
 
@@ -301,6 +307,10 @@
     renderTariffs(tariffs);
     document.getElementById('mac-value').textContent = macAddress;
     document.getElementById('router-value').textContent = routerId;
+    document.getElementById('restore-link').href =
+        '/restore_access?mac=' + encodeURIComponent(macAddress) +
+        '&router_id=' + encodeURIComponent(routerId) +
+        '&cid=' + encodeURIComponent(cid);
 
     function logClient(stage, elapsedMs, extra) {
         const payload = {

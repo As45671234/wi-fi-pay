@@ -7,6 +7,7 @@ import re
 import time
 import sqlite3
 import asyncio
+from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, Form, Response
@@ -17,12 +18,33 @@ from ..config import (
     KASPI_ENABLED, templates, logger,
 )
 from ..db import get_db
-from ..utils import utf8_json_response, _normalize_mac, _is_valid_mac, get_tariff_runtime_state
+from ..utils import utf8_json_response, _normalize_mac, _is_valid_mac, _normalize_phone, get_tariff_runtime_state
 from ..payments import get_signature, decode_nested_url_value, build_payment_url
 from ..pending import _enqueue_pending_activation, _drain_pending_activations
 from .portal import _create_pay_window
 
 router = APIRouter()
+
+
+def _upsert_phone_session_freedompay(phone: str, mac: str, router_id: str, expires_at: datetime):
+    now = datetime.utcnow().isoformat()
+    conn = get_db()
+    try:
+        conn.execute(
+            """INSERT INTO phone_sessions (phone, mac_address, router_id, expires_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(phone) DO UPDATE SET
+                   mac_address=excluded.mac_address,
+                   router_id=excluded.router_id,
+                   updated_at=excluded.updated_at""",
+            (phone, mac, router_id, expires_at.isoformat(), now),
+        )
+        conn.commit()
+        logger.info("[payment_result] phone_session upserted phone=%s*** mac=%s***", phone[:7], mac[:8])
+    except Exception as e:
+        logger.error("[payment_result] phone_session upsert error: %s", str(e)[:150])
+    finally:
+        conn.close()
 
 
 @router.get("/choose_payment", response_class=HTMLResponse)
@@ -61,9 +83,10 @@ async def choose_payment(
 
 
 @router.get("/start_payment")
-async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01", cid: str = ""):
+async def start_payment(request: Request, amount: int, mac: str, router_id: str = "astana_01", cid: str = "", phone: str = ""):
     cid = (cid or "-")[:24]
-    logger.info(f"[start_payment] START cid={cid} amount={amount} mac={mac[:8]}*** router={router_id}")
+    phone_norm = _normalize_phone(phone)
+    logger.info(f"[start_payment] START cid={cid} amount={amount} mac={mac[:8]}*** router={router_id} phone={'yes' if phone_norm else 'no'}")
     if not MERCHANT_ID or not SECRET_KEY:
         logger.error("[start_payment] FreedomPay env is not configured")
         return utf8_json_response({"error": "Платежный шлюз временно недоступен"}, status_code=503)
@@ -76,8 +99,6 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
         logger.error(f"[start_payment] Неизвестный router_id: {router_id}")
         return utf8_json_response({"error": "Неизвестный роутер"}, status_code=400)
 
-    # Синхронно гарантируем PAY_WINDOW перед редиректом на FreedomPay.
-    # force=True — всегда идём на MikroTik, не используем DB-кэш.
     ok, _err = await _create_pay_window(mac, router_id, cid)
     if not ok:
         logger.warning(f"[start_payment] PAY_WINDOW FAIL (продолжаем) cid={cid} mac={mac[:8]}*** router={router_id}")
@@ -88,8 +109,8 @@ async def start_payment(request: Request, amount: int, mac: str, router_id: str 
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id) VALUES (?, ?, 'PAYMENT_INITIATED', ?, ?)",
-            (mac, amount, router_id, payment_order_id),
+            "INSERT INTO orders (mac_address, amount, status, router_id, payment_order_id, phone) VALUES (?, ?, 'PAYMENT_INITIATED', ?, ?, ?)",
+            (mac, amount, router_id, payment_order_id, phone_norm or None),
         )
         conn.commit()
     finally:
@@ -224,8 +245,19 @@ async def payment_result(request: Request):
             conn.commit()
             logger.info(f"[payment_result] ✓ УСПЕХ: {amount} ₸ подтверждено для {mac[:8]}***, активация через очередь")
             logger.info(f"[payment_result] 🔍 Для диагностики: http://wifi-pay.kz/debug?mac={mac}&router_id={router_id}")
+
+            # Сохраняем phone_session если юзер указал телефон
+            phone_row = conn.execute(
+                "SELECT phone FROM orders WHERE payment_order_id=? LIMIT 1",
+                (payment_order_id,),
+            ).fetchone() if payment_order_id else None
+            phone_stored = phone_row[0] if phone_row and phone_row[0] else None
         finally:
             conn.close()
+
+        if phone_stored:
+            expires_at = datetime.utcnow() + timedelta(minutes=minutes)
+            _upsert_phone_session_freedompay(phone_stored, mac, router_id, expires_at)
 
         return Response(content="OK", status_code=200)
 

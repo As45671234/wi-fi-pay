@@ -55,6 +55,18 @@ def _is_valid_mac(mac: str) -> bool:
     return mac_norm != "00:00:00:00:00:00"
 
 
+def _normalize_phone(phone: str) -> str:
+    """Нормализует казахстанский номер телефона в 11-значный формат 7XXXXXXXXXX."""
+    digits = re.sub(r'\D', '', phone or '')
+    if len(digits) == 11 and digits.startswith('8'):
+        digits = '7' + digits[1:]
+    elif len(digits) == 10:
+        digits = '7' + digits
+    if len(digits) != 11 or not digits.startswith('7'):
+        return ''
+    return digits
+
+
 # ── RouterOS duration parser ───────────────────────────────────────────────
 
 def _routeros_duration_to_seconds(raw: str) -> int | None:
