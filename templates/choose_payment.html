@@ -215,17 +215,7 @@
     <div class="option">
         <p class="option-title">Оплата картой</p>
         <p class="option-desc">Оплата картой любого банка через FreedomPay.</p>
-        <div style="margin-bottom: 0.7rem;">
-            <input
-                type="tel"
-                id="card-phone"
-                placeholder="Телефон для восстановления (необязательно)"
-                autocomplete="tel"
-                inputmode="tel"
-                style="width:100%;box-sizing:border-box;padding:0.65rem 0.85rem;border:1px solid #e5e7eb;border-radius:0.75rem;font-size:0.88rem;color:#374151;outline:none;"
-            >
-        </div>
-        <a class="btn btn-freedom" id="card-pay-btn" href="/start_payment?amount={{ amount }}&mac={{ mac | urlencode }}&router_id={{ router_id | urlencode }}&cid={{ cid | urlencode }}">Оплатить картой</a>
+        <a class="btn btn-freedom" id="card-pay-btn" href="#">Оплатить картой</a>
     </div>
 
     <div class="actions">
@@ -234,6 +224,36 @@
 
     <div class="meta">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
 </div>
+
+<!-- Модальное окно: телефон для восстановления доступа -->
+<div id="phone-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:flex-end;justify-content:center;padding-bottom:0;">
+    <div style="background:#fff;border-radius:1.75rem 1.75rem 0 0;padding:1.75rem 1.5rem 2rem;width:100%;max-width:480px;box-sizing:border-box;animation:slideUp 0.25s ease;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <p style="margin:0;font-size:1.05rem;font-weight:700;color:#111827;">Номер телефона</p>
+            <button id="modal-close" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.4rem;line-height:1;padding:0;">&times;</button>
+        </div>
+        <p style="margin:0 0 1.2rem;font-size:0.875rem;color:#6b7280;line-height:1.5;">
+            Если Wi-Fi отключится после оплаты, вы сможете восстановить доступ по номеру телефона без повторной оплаты.
+        </p>
+        <input
+            type="tel"
+            id="modal-phone"
+            placeholder="+7 777 000 00 00"
+            inputmode="tel"
+            autocomplete="tel"
+            style="width:100%;box-sizing:border-box;padding:0.9rem 1rem;border:2px solid #e5e7eb;border-radius:1rem;font-size:1.1rem;color:#111827;outline:none;margin-bottom:1rem;letter-spacing:0.02em;"
+        >
+        <button id="modal-submit" style="width:100%;background:#1c75ff;color:#fff;border:none;border-radius:1rem;padding:1rem;font-size:1rem;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(28,117,255,0.25);margin-bottom:0.6rem;">Продолжить к оплате</button>
+        <a id="modal-skip" href="#" style="display:block;text-align:center;color:#9ca3af;font-size:0.85rem;text-decoration:none;padding:0.4rem 0;">Пропустить</a>
+    </div>
+</div>
+
+<style>
+@keyframes slideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+}
+</style>
 
 <script>
 'use strict';
@@ -246,18 +266,90 @@ const cid = "{{ cid }}";
 // PAY_WINDOW создаётся синхронно в /start_payment перед редиректом на FreedomPay.
 // Fire-and-forget здесь убран: он мог гоняться с /start_payment и удалять биндинг.
 
-const cardPayBtn = document.getElementById('card-pay-btn');
-if (cardPayBtn) {
-    cardPayBtn.addEventListener('click', function(e) {
-        const phoneVal = (document.getElementById('card-phone').value || '').trim();
-        if (phoneVal) {
-            e.preventDefault();
-            const base = `/start_payment?amount=${amount}&mac=${encodeURIComponent(mac)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}&phone=${encodeURIComponent(phoneVal)}`;
-            window.location.href = base;
+function buildPayUrl(phone) {
+    let url = `/start_payment?amount=${amount}&mac=${encodeURIComponent(mac)}&router_id=${encodeURIComponent(routerId)}&cid=${encodeURIComponent(cid)}`;
+    if (phone) url += `&phone=${encodeURIComponent(phone)}`;
+    return url;
+}
+
+// ── Телефонная маска +7 XXX XXX XX XX ──────────────────────────────────────
+function applyPhoneMask(input) {
+    input.addEventListener('focus', function() {
+        if (!this.value) this.value = '+7 ';
+    });
+    input.addEventListener('input', function() {
+        let digits = this.value.replace(/\D/g, '');
+        if (digits.startsWith('87') || digits.startsWith('77')) {
+            digits = digits.slice(digits.startsWith('8') ? 1 : 0);
         }
-        // Если телефон не введён — href уже правильный, браузер переходит без phone
+        if (!digits.startsWith('7')) digits = '7' + digits.replace(/^7*/, '');
+        digits = digits.slice(0, 11);
+        let body = digits.slice(1);
+        let out = '+7';
+        if (body.length > 0) out += ' ' + body.slice(0, 3);
+        if (body.length > 3) out += ' ' + body.slice(3, 6);
+        if (body.length > 6) out += ' ' + body.slice(6, 8);
+        if (body.length > 8) out += ' ' + body.slice(8, 10);
+        this.value = out;
+    });
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Backspace' && this.value === '+7 ') {
+            e.preventDefault();
+        }
     });
 }
+
+function extractDigits(masked) {
+    return masked.replace(/\D/g, '');
+}
+
+// ── Модальное окно ──────────────────────────────────────────────────────────
+const cardPayBtn = document.getElementById('card-pay-btn');
+const modal = document.getElementById('phone-modal');
+const phoneInput = document.getElementById('modal-phone');
+const modalSubmit = document.getElementById('modal-submit');
+const modalSkip = document.getElementById('modal-skip');
+const modalClose = document.getElementById('modal-close');
+
+applyPhoneMask(phoneInput);
+
+cardPayBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    phoneInput.value = '+7 ';
+    modal.style.display = 'flex';
+    setTimeout(() => phoneInput.focus(), 120);
+});
+
+function closeModal() { modal.style.display = 'none'; }
+
+modalClose.addEventListener('click', closeModal);
+modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+
+modalSkip.addEventListener('click', function(e) {
+    e.preventDefault();
+    closeModal();
+    window.location.href = buildPayUrl('');
+});
+
+modalSubmit.addEventListener('click', function() {
+    const digits = extractDigits(phoneInput.value);
+    if (digits.length < 11) {
+        phoneInput.style.borderColor = '#ef4444';
+        phoneInput.focus();
+        return;
+    }
+    phoneInput.style.borderColor = '#3b82f6';
+    closeModal();
+    window.location.href = buildPayUrl(digits);
+});
+
+phoneInput.addEventListener('input', function() {
+    this.style.borderColor = '#e5e7eb';
+});
+
+phoneInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') modalSubmit.click();
+});
 
 const kaspiBtn = document.getElementById('kaspiBtn');
 if (kaspiBtn) {
