@@ -25,8 +25,8 @@ def _get_active_session(phone: str, now: datetime):
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT mac_address, router_id, expires_at FROM phone_sessions WHERE phone=? AND expires_at > ?",
-            (phone, now.isoformat()),
+            "SELECT mac_address, router_id, expires_at FROM phone_sessions WHERE phone=? AND expires_at > datetime('now')",
+            (phone,),
         ).fetchone()
         if row:
             return row[0], row[1], datetime.fromisoformat(row[2])
