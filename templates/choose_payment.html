@@ -225,15 +225,42 @@
     <div class="meta">ID: {{ mac }} | ROUTER: {{ router_id }}</div>
 </div>
 
-<!-- Модальное окно: телефон для восстановления доступа -->
-<div id="phone-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:flex-end;justify-content:center;padding-bottom:0;">
-    <div style="background:#fff;border-radius:1.75rem 1.75rem 0 0;padding:1.75rem 1.5rem 2rem;width:100%;max-width:480px;box-sizing:border-box;animation:slideUp 0.25s ease;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
-            <p style="margin:0;font-size:1.05rem;font-weight:700;color:#111827;">Номер телефона</p>
-            <button id="modal-close" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.4rem;line-height:1;padding:0;">&times;</button>
+<style>
+#phone-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 9999;
+}
+#phone-modal.open {
+    display: block;
+}
+#phone-modal-inner {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: #fff;
+    border-radius: 1.5rem 1.5rem 0 0;
+    padding: 1.5rem 1.25rem 2rem;
+    box-sizing: border-box;
+}
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+}
+#phone-modal.open #phone-modal-inner {
+    animation: slideUp 0.22s ease;
+}
+</style>
+
+<div id="phone-modal">
+    <div id="phone-modal-inner">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.9rem;">
+            <p style="margin:0;font-size:1rem;font-weight:700;color:#111827;">Введите номер телефона</p>
+            <button id="modal-close" type="button" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.5rem;line-height:1;padding:4px 8px;">&times;</button>
         </div>
-        <p style="margin:0 0 1.2rem;font-size:0.875rem;color:#6b7280;line-height:1.5;">
-            Если Wi-Fi отключится после оплаты, вы сможете восстановить доступ по номеру телефона без повторной оплаты.
+        <p style="margin:0 0 1rem;font-size:0.85rem;color:#6b7280;line-height:1.5;">
+            Если Wi-Fi отключится, вы восстановите доступ по номеру — без повторной оплаты.
         </p>
         <input
             type="tel"
@@ -241,18 +268,12 @@
             placeholder="+7 777 000 00 00"
             inputmode="tel"
             autocomplete="tel"
-            style="width:100%;box-sizing:border-box;padding:0.9rem 1rem;border:2px solid #e5e7eb;border-radius:1rem;font-size:1.1rem;color:#111827;outline:none;margin-bottom:1rem;letter-spacing:0.02em;"
+            style="width:100%;box-sizing:border-box;padding:0.85rem 1rem;border:2px solid #e5e7eb;border-radius:0.9rem;font-size:1.05rem;color:#111827;outline:none;margin-bottom:0.85rem;"
         >
-        <button id="modal-submit" style="width:100%;background:#1c75ff;color:#fff;border:none;border-radius:1rem;padding:1rem;font-size:1rem;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(28,117,255,0.25);">Продолжить к оплате</button>
+        <div id="modal-phone-error" style="display:none;color:#ef4444;font-size:0.82rem;margin-bottom:0.6rem;">Введите корректный номер</div>
+        <button id="modal-submit" type="button" style="width:100%;background:#1c75ff;color:#fff;border:none;border-radius:0.9rem;padding:0.95rem;font-size:1rem;font-weight:700;cursor:pointer;">Продолжить к оплате</button>
     </div>
 </div>
-
-<style>
-@keyframes slideUp {
-    from { transform: translateY(100%); opacity: 0; }
-    to   { transform: translateY(0);    opacity: 1; }
-}
-</style>
 
 <script>
 'use strict';
@@ -303,45 +324,58 @@ function extractDigits(masked) {
 }
 
 // ── Модальное окно ──────────────────────────────────────────────────────────
-const cardPayBtn = document.getElementById('card-pay-btn');
-const modal = document.getElementById('phone-modal');
-const phoneInput = document.getElementById('modal-phone');
-const modalSubmit = document.getElementById('modal-submit');
-const modalClose = document.getElementById('modal-close');
+var cardPayBtn  = document.getElementById('card-pay-btn');
+var modal       = document.getElementById('phone-modal');
+var phoneInput  = document.getElementById('modal-phone');
+var modalSubmit = document.getElementById('modal-submit');
+var modalClose  = document.getElementById('modal-close');
+var phoneError  = document.getElementById('modal-phone-error');
 
 applyPhoneMask(phoneInput);
 
-cardPayBtn.addEventListener('click', function(e) {
-    e.preventDefault();
+function openModal() {
     phoneInput.value = '+7 ';
-    modal.style.display = 'flex';
-    setTimeout(() => phoneInput.focus(), 120);
-});
+    phoneError.style.display = 'none';
+    phoneInput.style.borderColor = '#e5e7eb';
+    modal.className = 'open';
+    setTimeout(function() { phoneInput.focus(); }, 150);
+}
+function closeModal() {
+    modal.className = '';
+}
 
-function closeModal() { modal.style.display = 'none'; }
+cardPayBtn.onclick = function(e) {
+    e.preventDefault();
+    openModal();
+    return false;
+};
 
-modalClose.addEventListener('click', closeModal);
-modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+modalClose.onclick = function() { closeModal(); };
 
-modalSubmit.addEventListener('click', function() {
-    const digits = extractDigits(phoneInput.value);
+modal.onclick = function(e) {
+    if (e.target === modal) closeModal();
+};
+
+modalSubmit.onclick = function() {
+    var digits = extractDigits(phoneInput.value);
     if (digits.length < 11) {
         phoneInput.style.borderColor = '#ef4444';
+        phoneError.style.display = 'block';
         phoneInput.focus();
         return;
     }
-    phoneInput.style.borderColor = '#3b82f6';
     closeModal();
     window.location.href = buildPayUrl(digits);
-});
+};
 
-phoneInput.addEventListener('input', function() {
-    this.style.borderColor = '#e5e7eb';
-});
+phoneInput.oninput = function() {
+    phoneInput.style.borderColor = '#e5e7eb';
+    phoneError.style.display = 'none';
+};
 
-phoneInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') modalSubmit.click();
-});
+phoneInput.onkeydown = function(e) {
+    if (e.key === 'Enter') modalSubmit.onclick();
+};
 
 const kaspiBtn = document.getElementById('kaspiBtn');
 if (kaspiBtn) {
