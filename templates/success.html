@@ -270,7 +270,8 @@ function syncFromServer() {
     fetch('/session_status?mac=' + encodeURIComponent(MAC) + '&router_id=' + encodeURIComponent(ROUTER_ID))
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (!data.active && data.expires_in < 0) {
+            // pending_activation = активация MikroTik ещё идёт, локальный таймер держим
+            if (!data.active && data.expires_in < 0 && !data.pending_activation) {
                 expiryTs = Date.now();
                 return;
             }

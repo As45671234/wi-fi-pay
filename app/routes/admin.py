@@ -68,7 +68,7 @@ def _collect_router_stats() -> dict:
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS month_cnt,
                 SUM(CASE WHEN created_at >= ? THEN amount ELSE 0 END) AS month_revenue
             FROM orders
-            WHERE status = 'PAID' AND router_id IS NOT NULL AND amount > 0
+            WHERE status IN ('PAID', 'PAYMENT_CONFIRMED') AND router_id IS NOT NULL AND amount > 0
             GROUP BY router_id, amount
             ORDER BY router_id, amount
         """, (today_str, today_str, week_ago_utc, week_ago_utc, month_ago_utc, month_ago_utc)).fetchall()
@@ -230,7 +230,7 @@ def _collect_router_stats_range(from_date: str, to_date: str) -> dict:
         fp_rows = conn.execute("""
             SELECT router_id, amount, COUNT(*) AS cnt, SUM(amount) AS revenue
             FROM orders
-            WHERE status = 'PAID' AND router_id IS NOT NULL AND amount > 0
+            WHERE status IN ('PAID', 'PAYMENT_CONFIRMED') AND router_id IS NOT NULL AND amount > 0
               AND date(created_at, '+5 hours') BETWEEN ? AND ?
             GROUP BY router_id, amount
         """, (from_date, to_date)).fetchall()
