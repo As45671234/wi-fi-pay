@@ -222,11 +222,122 @@
             white-space: nowrap;
         }
 
+        /* ── Переключатель режима вид ── */
+        .view-toggle {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 16px;
+        }
+        .view-toggle button {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #fff;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 7px 18px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: #64748b;
+            transition: all .15s;
+            font-family: inherit;
+        }
+        .view-toggle button.active {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(37,99,235,.25);
+        }
+        .view-toggle button:not(.active):hover {
+            border-color: #2563eb;
+            color: #2563eb;
+        }
+
+        /* ── График ── */
+        .chart-wrap {
+            display: none;
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.07);
+            padding: 24px 20px 16px;
+        }
+        .chart-wrap.visible { display: block; }
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .chart-title {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #1e293b;
+        }
+        .chart-legend {
+            display: flex;
+            gap: 16px;
+            font-size: 0.78rem;
+            color: #475569;
+        }
+        .legend-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 3px;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+        .chart-canvas-wrap { position: relative; height: 320px; }
+        .chart-loading {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,.85);
+            font-size: 0.9rem;
+            color: #94a3b8;
+            border-radius: 10px;
+        }
+        .chart-empty {
+            display: none;
+            text-align: center;
+            padding: 60px 0;
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+        .chart-metric-tabs {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 0;
+        }
+        .chart-metric-tabs button {
+            background: #f1f5f9;
+            border: none;
+            border-radius: 7px;
+            padding: 4px 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: #64748b;
+            font-family: inherit;
+            transition: all .12s;
+        }
+        .chart-metric-tabs button.active {
+            background: #2563eb;
+            color: #fff;
+        }
+
         @media (max-width: 600px) {
             .summary-cards { grid-template-columns: 1fr 1fr; }
             .custom-range { flex-direction: column; align-items: flex-start; }
+            .chart-canvas-wrap { height: 240px; }
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -297,8 +408,42 @@
     </div>
 </div>
 
+<!-- Переключатель режимов -->
+<div class="view-toggle">
+    <button class="active" id="btn-view-table" onclick="setView('table')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+        Таблица
+    </button>
+    <button id="btn-view-chart" onclick="setView('chart')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        График
+    </button>
+</div>
+
+<!-- График -->
+<div class="chart-wrap" id="chart-wrap">
+    <div class="chart-header">
+        <span class="chart-title" id="chart-title">Выручка по дням</span>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <div class="chart-metric-tabs">
+                <button class="active" id="metric-revenue" onclick="setMetric('revenue')">Выручка ₸</button>
+                <button id="metric-count" onclick="setMetric('count')">Оплат</button>
+            </div>
+            <div class="chart-legend">
+                <span><span class="legend-dot" style="background:#3b82f6"></span>FreedomPay</span>
+                <span><span class="legend-dot" style="background:#22c55e"></span>Kaspi</span>
+            </div>
+        </div>
+    </div>
+    <div class="chart-canvas-wrap">
+        <canvas id="statsChart"></canvas>
+        <div class="chart-loading" id="chart-loading">Загрузка данных…</div>
+    </div>
+    <div class="chart-empty" id="chart-empty">Нет данных за выбранный период</div>
+</div>
+
 <!-- Основная таблица -->
-<div class="table-wrap">
+<div class="table-wrap" id="table-wrap">
 <table>
     <thead>
         <tr>
@@ -655,6 +800,221 @@ function _applyRangeData(data) {
 // ── Клавиша Enter в полях дат ───────────────────────────────
 document.getElementById('date-from').addEventListener('keydown', e => { if (e.key === 'Enter') applyCustomRange(); });
 document.getElementById('date-to').addEventListener('keydown',   e => { if (e.key === 'Enter') applyCustomRange(); });
+
+// ════════════════════════════════════════════════════════════
+// РЕЖИМ ПРОСМОТРА: таблица / график
+// ════════════════════════════════════════════════════════════
+var _currentView   = 'table';
+var _currentMetric = 'revenue';
+var _chartInstance = null;
+var _chartDaysData = null;   // последние загруженные данные
+
+function setView(mode) {
+    _currentView = mode;
+    var tableWrap = document.getElementById('table-wrap');
+    var chartWrap = document.getElementById('chart-wrap');
+    var btnTable  = document.getElementById('btn-view-table');
+    var btnChart  = document.getElementById('btn-view-chart');
+
+    if (mode === 'table') {
+        tableWrap.style.display = '';
+        chartWrap.classList.remove('visible');
+        btnTable.classList.add('active');
+        btnChart.classList.remove('active');
+    } else {
+        tableWrap.style.display = 'none';
+        chartWrap.classList.add('visible');
+        btnTable.classList.remove('active');
+        btnChart.classList.add('active');
+        _loadChartData();
+    }
+}
+
+function setMetric(metric) {
+    _currentMetric = metric;
+    document.getElementById('metric-revenue').classList.toggle('active', metric === 'revenue');
+    document.getElementById('metric-count').classList.toggle('active', metric === 'count');
+    if (_chartDaysData) _renderChart(_chartDaysData);
+}
+
+// Вычисляет диапазон дат для текущего активного периода/кастомного диапазона
+function _getActiveDateRange() {
+    var today = '{{ data.today_date }}';
+    var activeBtn = document.querySelector('.period-tabs button.active');
+    var period = activeBtn ? activeBtn.getAttribute('onclick').match(/switchPeriod\('(\w+)'/)?.[1] : 'total';
+
+    var from = document.getElementById('date-from').value;
+    var to   = document.getElementById('date-to').value;
+
+    // Если активен кастомный диапазон — используем его
+    if (document.getElementById('custom-range').classList.contains('range-active')) {
+        return { from: from, to: to };
+    }
+
+    if (period === 'today') return { from: today, to: today };
+    if (period === 'week')  return { from: _addDays(today, -6), to: today };
+    if (period === 'month') return { from: _addDays(today, -29), to: today };
+    // total — последние 90 дней чтобы график был читаемым
+    return { from: _addDays(today, -89), to: today };
+}
+
+function _addDays(dateStr, n) {
+    var d = new Date(dateStr);
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+}
+
+async function _loadChartData() {
+    var range = _getActiveDateRange();
+    var loadingEl = document.getElementById('chart-loading');
+    var emptyEl   = document.getElementById('chart-empty');
+    loadingEl.style.display = 'flex';
+    emptyEl.style.display   = 'none';
+
+    var title = document.getElementById('chart-title');
+    title.textContent = range.from === range.to
+        ? 'Выручка по дням — ' + fmtDate(range.from)
+        : 'Выручка по дням — ' + fmtDate(range.from) + ' – ' + fmtDate(range.to);
+
+    try {
+        var headers = {};
+        if (_ADMIN_TOKEN) headers['X-Admin-Token'] = _ADMIN_TOKEN;
+        var token = _ADMIN_TOKEN ? '&token=' + encodeURIComponent(_ADMIN_TOKEN) : '';
+        var resp = await fetch('/api/admin/stats/daily?from_date=' + range.from + '&to_date=' + range.to + token, { headers });
+        if (!resp.ok) { loadingEl.style.display = 'none'; return; }
+        var data = await resp.json();
+        _chartDaysData = data.days || [];
+        _renderChart(_chartDaysData);
+    } catch(e) {
+        loadingEl.style.display = 'none';
+    }
+}
+
+function _renderChart(days) {
+    var loadingEl = document.getElementById('chart-loading');
+    var emptyEl   = document.getElementById('chart-empty');
+    loadingEl.style.display = 'none';
+
+    var hasData = days.some(function(d) {
+        return _currentMetric === 'revenue'
+            ? (d.fp_revenue + d.kaspi_revenue) > 0
+            : (d.fp_count + d.kaspi_count) > 0;
+    });
+
+    if (!hasData) {
+        emptyEl.style.display = 'block';
+        if (_chartInstance) { _chartInstance.destroy(); _chartInstance = null; }
+        return;
+    }
+    emptyEl.style.display = 'none';
+
+    var labels = days.map(function(d) {
+        var parts = d.date.split('-');
+        return parts[2] + '.' + parts[1];
+    });
+
+    var fpData    = days.map(function(d) { return _currentMetric === 'revenue' ? d.fp_revenue    : d.fp_count; });
+    var kaspiData = days.map(function(d) { return _currentMetric === 'revenue' ? d.kaspi_revenue : d.kaspi_count; });
+
+    var yLabel = _currentMetric === 'revenue' ? '₸' : 'оплат';
+
+    var canvas = document.getElementById('statsChart');
+
+    if (_chartInstance) {
+        _chartInstance.data.labels = labels;
+        _chartInstance.data.datasets[0].data = fpData;
+        _chartInstance.data.datasets[1].data = kaspiData;
+        _chartInstance.options.scales.y.title.text = yLabel;
+        _chartInstance.update('active');
+        return;
+    }
+
+    _chartInstance = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'FreedomPay',
+                    data: fpData,
+                    backgroundColor: 'rgba(59,130,246,0.85)',
+                    borderRadius: 4,
+                    borderSkipped: false,
+                    stack: 'revenue',
+                },
+                {
+                    label: 'Kaspi',
+                    data: kaspiData,
+                    backgroundColor: 'rgba(34,197,94,0.85)',
+                    borderRadius: 4,
+                    borderSkipped: false,
+                    stack: 'revenue',
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            var v = ctx.parsed.y;
+                            if (_currentMetric === 'revenue') {
+                                return ' ' + ctx.dataset.label + ': ' + v.toLocaleString('ru-RU') + ' ₸';
+                            }
+                            return ' ' + ctx.dataset.label + ': ' + v + ' оплат';
+                        },
+                        footer: function(items) {
+                            var total = items.reduce(function(s, i) { return s + i.parsed.y; }, 0);
+                            if (total === 0) return '';
+                            return _currentMetric === 'revenue'
+                                ? 'Итого: ' + total.toLocaleString('ru-RU') + ' ₸'
+                                : 'Итого: ' + total + ' оплат';
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: { font: { size: 11 }, color: '#94a3b8', maxRotation: 45 },
+                },
+                y: {
+                    stacked: true,
+                    grid: { color: '#f1f5f9' },
+                    ticks: {
+                        font: { size: 11 },
+                        color: '#94a3b8',
+                        callback: function(v) {
+                            if (_currentMetric === 'revenue') {
+                                return v >= 1000 ? (v/1000).toFixed(v % 1000 === 0 ? 0 : 1) + 'k' : v;
+                            }
+                            return v;
+                        },
+                    },
+                    title: { display: true, text: yLabel, color: '#94a3b8', font: { size: 11 } },
+                },
+            },
+        },
+    });
+}
+
+// Обновляем график при переключении периода (если открыт режим графика)
+var _origSwitchPeriod = switchPeriod;
+switchPeriod = function(period, btn) {
+    _origSwitchPeriod(period, btn);
+    if (_currentView === 'chart') _loadChartData();
+};
+
+var _origApplyCustomRange = applyCustomRange;
+applyCustomRange = async function() {
+    await _origApplyCustomRange();
+    if (_currentView === 'chart') _loadChartData();
+};
 </script>
 </body>
 </html>

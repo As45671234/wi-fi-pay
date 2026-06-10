@@ -298,6 +298,74 @@ def _collect_router_stats_range(from_date: str, to_date: str) -> dict:
     }
 
 
+def _collect_daily_stats(from_date: str, to_date: str) -> dict:
+    """Per-day revenue and count breakdown for chart view."""
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        fp_rows = conn.execute("""
+            SELECT date(created_at, '+5 hours') AS day,
+                   COUNT(*) AS cnt, SUM(amount) AS revenue
+            FROM orders
+            WHERE status IN ('PAID', 'PAYMENT_CONFIRMED') AND amount > 0
+              AND date(created_at, '+5 hours') BETWEEN ? AND ?
+            GROUP BY day ORDER BY day
+        """, (from_date, to_date)).fetchall()
+
+        kaspi_rows = conn.execute("""
+            SELECT date(COALESCE(activated_at, created_at), '+5 hours') AS day,
+                   COUNT(*) AS cnt, SUM(amount) AS revenue
+            FROM kaspi_orders
+            WHERE is_activated = 1 AND amount > 0
+              AND date(COALESCE(activated_at, created_at), '+5 hours') BETWEEN ? AND ?
+            GROUP BY day ORDER BY day
+        """, (from_date, to_date)).fetchall()
+    finally:
+        conn.close()
+
+    fp_by_day   = {r["day"]: {"cnt": r["cnt"], "rev": int(r["revenue"] or 0)} for r in fp_rows}
+    kaspi_by_day = {r["day"]: {"cnt": r["cnt"], "rev": int(r["revenue"] or 0)} for r in kaspi_rows}
+
+    # Build full date range so days with zero data are still present
+    from datetime import date as _date, timedelta as _td
+    d = _date.fromisoformat(from_date)
+    end = _date.fromisoformat(to_date)
+    days = []
+    while d <= end:
+        ds = d.isoformat()
+        fp  = fp_by_day.get(ds, {"cnt": 0, "rev": 0})
+        ka  = kaspi_by_day.get(ds, {"cnt": 0, "rev": 0})
+        days.append({
+            "date":          ds,
+            "fp_revenue":    fp["rev"],
+            "kaspi_revenue": ka["rev"],
+            "fp_count":      fp["cnt"],
+            "kaspi_count":   ka["cnt"],
+        })
+        d += _td(days=1)
+
+    return {"from_date": from_date, "to_date": to_date, "days": days}
+
+
+@router.get("/api/admin/stats/daily")
+async def admin_stats_daily(request: Request, from_date: str, to_date: str):
+    import hmac as _h
+    url_token = (request.query_params.get("token") or "").strip()
+    if not _has_admin_auth(request):
+        if not (url_token and ADMIN_TOKEN and _h.compare_digest(url_token, ADMIN_TOKEN)):
+            return utf8_json_response({"error": "Unauthorized"}, status_code=401)
+    try:
+        from datetime import date as _date
+        _date.fromisoformat(from_date)
+        _date.fromisoformat(to_date)
+    except ValueError:
+        return utf8_json_response({"error": "Invalid date format, expected YYYY-MM-DD"}, status_code=400)
+    if from_date > to_date:
+        from_date, to_date = to_date, from_date
+    data = await asyncio.to_thread(_collect_daily_stats, from_date, to_date)
+    return utf8_json_response(data)
+
+
 @router.get("/api/admin/stats/range")
 async def admin_stats_range(request: Request, from_date: str, to_date: str):
     import hmac as _h
