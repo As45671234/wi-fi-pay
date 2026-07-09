@@ -56,6 +56,7 @@
             font-family: inherit;
         }
         input:focus, select:focus { border-color: #1c75ff; }
+        option:disabled { color: #d1d5db; }
         .btn {
             display: block;
             width: 100%;
@@ -74,6 +75,7 @@
         }
         .btn:active { opacity: 0.88; }
         .meta { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1.2rem; text-align: center; }
+        .limit-note { font-size: 0.75rem; color: #9ca3af; margin-top: 0.4rem; }
     </style>
 </head>
 <body>
@@ -87,16 +89,18 @@
     {% endif %}
 
     <form action="/api/driver_access" method="POST">
-        <label for="password">Пароль</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <input type="hidden" name="password" value="{{ password }}">
 
         <label for="router_id">Роутер (автобус)</label>
         <select id="router_id" name="router_id" required>
             <option value="">— выберите —</option>
-            {% for rid in router_ids %}
-            <option value="{{ rid }}" {% if rid == router_id %}selected{% endif %}>{{ rid }}</option>
+            {% for r in routers %}
+            <option value="{{ r.id }}" {% if r.id == router_id %}selected{% endif %} {% if r.full and r.id != router_id %}disabled{% endif %}>
+                {{ r.id }} ({{ r.count }}/{{ max_drivers }}{% if r.full %} — занято{% endif %})
+            </option>
             {% endfor %}
         </select>
+        <p class="limit-note">Максимум {{ max_drivers }} водителя на один роутер.</p>
 
         <label for="phone">Номер телефона водителя</label>
         <input
@@ -111,7 +115,7 @@
         >
 
         <label for="note">Комментарий (необязательно)</label>
-        <input type="text" id="note" name="note" placeholder="Имя водителя / номер автобуса">
+        <input type="text" id="note" name="note" value="{{ note }}" placeholder="Имя водителя / номер автобуса">
 
         <button class="btn" type="submit">Выдать доступ</button>
     </form>

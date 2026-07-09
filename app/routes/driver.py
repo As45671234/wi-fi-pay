@@ -1,10 +1,12 @@
 """
 app/routes/driver.py — Driver whitelist provisioning (замена grant_permanent_access.sh).
 
-Flow:
-  GET  /driver_access               → форма: пароль + роутер (id) + телефон водителя
-  POST /api/driver_access           → проверка пароля, автоопределение MAC на роутере,
-                                       выдача бессрочного доступа, запись в driver_phones.
+Flow (два шага, пароль отдельно от формы):
+  GET  /driver_access               → шаг 1: только пароль
+  POST /driver_access               → проверка пароля → шаг 2: роутер (id) + телефон + комментарий
+  POST /api/driver_access           → повторная проверка пароля, лимит 3 телефона на роутер,
+                                       автоопределение MAC на роутере, выдача бессрочного доступа,
+                                       запись в driver_phones.
 
 Дальнейшая смена устройства водителем — самостоятельно через /restore_access
 (тот же номер телефона), без участия админа.
@@ -13,6 +15,7 @@ Flow:
 import asyncio
 import hmac as _hmac
 from datetime import datetime
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse
@@ -26,26 +29,61 @@ from ..pending import _get_busy_activation_macs
 router = APIRouter()
 
 _MAC_DETECT_TIMEOUT_SECONDS = 5.0
+_MAX_DRIVERS_PER_ROUTER = 3
 
 
-@router.get("/driver_access")
-async def driver_access_page(
-    request: Request,
-    router_id: str = "",
-    phone: str = "",
-    error: str = "",
-):
+def _check_password(password: str) -> bool:
+    return bool(DRIVER_ACCESS_PASSWORD) and _hmac.compare_digest((password or "").strip(), DRIVER_ACCESS_PASSWORD)
+
+
+def _router_driver_counts() -> dict:
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT router_id, COUNT(*) FROM driver_phones GROUP BY router_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row[0]: row[1] for row in rows}
+
+
+def _render_form(request: Request, password: str, router_id: str = "", phone: str = "", note: str = "", error: str = ""):
+    counts = _router_driver_counts()
+    routers = [
+        {"id": rid, "count": counts.get(rid, 0), "full": counts.get(rid, 0) >= _MAX_DRIVERS_PER_ROUTER}
+        for rid in sorted(ROUTERS_CONFIG.keys())
+    ]
     return templates.TemplateResponse(
         "driver_access.html",
         {
             "request": request,
-            "router_ids": sorted(ROUTERS_CONFIG.keys()),
+            "password": password,
+            "routers": routers,
+            "max_drivers": _MAX_DRIVERS_PER_ROUTER,
             "router_id": router_id,
             "phone": phone,
+            "note": note,
             "error": error,
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.get("/driver_access")
+async def driver_login_page(request: Request, error: str = ""):
+    return templates.TemplateResponse(
+        "driver_login.html",
+        {"request": request, "error": error},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/driver_access")
+async def driver_login_submit(request: Request, password: str = Form(...)):
+    if not _check_password(password):
+        logger.warning("[driver_access] неверный пароль (шаг 1)")
+        return RedirectResponse(url=f"/driver_access?{urlencode({'error': 'Неверный пароль'})}", status_code=303)
+    return _render_form(request, password)
 
 
 @router.post("/api/driver_access")
@@ -56,21 +94,31 @@ async def api_driver_access(
     phone: str = Form(...),
     note: str = Form(""),
 ):
-    def _error_redirect(msg: str) -> RedirectResponse:
-        from urllib.parse import urlencode
-        qs = urlencode({"router_id": router_id, "phone": phone, "error": msg})
-        return RedirectResponse(url=f"/driver_access?{qs}", status_code=303)
-
-    if not DRIVER_ACCESS_PASSWORD or not _hmac.compare_digest(password.strip(), DRIVER_ACCESS_PASSWORD):
-        logger.warning("[driver_access] неверный пароль router=%s", router_id)
-        return _error_redirect("Неверный пароль")
+    if not _check_password(password):
+        logger.warning("[driver_access] неверный пароль (шаг 2) router=%s", router_id)
+        return RedirectResponse(url=f"/driver_access?{urlencode({'error': 'Неверный пароль'})}", status_code=303)
 
     phone_norm = _normalize_phone(phone)
     if not phone_norm:
-        return _error_redirect("Некорректный номер телефона")
+        return _render_form(request, password, router_id, phone, note, "Некорректный номер телефона")
 
     if router_id not in ROUTERS_CONFIG:
-        return _error_redirect("Неизвестный роутер")
+        return _render_form(request, password, router_id, phone, note, "Неизвестный роутер")
+
+    conn = get_db()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM driver_phones WHERE router_id=? AND phone<>?",
+            (router_id, phone_norm),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    if count >= _MAX_DRIVERS_PER_ROUTER:
+        return _render_form(
+            request, password, router_id, phone, note,
+            f"На роутере {router_id} уже {_MAX_DRIVERS_PER_ROUTER} водителя(ей) — лимит достигнут. "
+            "Освободите слот или выберите другой роутер.",
+        )
 
     busy_macs = _get_busy_activation_macs(router_id)
     loop = asyncio.get_running_loop()
@@ -86,9 +134,10 @@ async def api_driver_access(
 
     if not mac:
         logger.info("[driver_access] mac not found router=%s reason=%s phone=%s***", router_id, reason, phone_norm[:7])
-        return _error_redirect(
+        return _render_form(
+            request, password, router_id, phone, note,
             "Не удалось определить устройство. Убедитесь, что телефон водителя "
-            "подключён к WiFi этого автобуса (и больше никто не подключён), и повторите."
+            "подключён к WiFi этого автобуса (и больше никто не подключён), и повторите.",
         )
 
     ok = await asyncio.wait_for(
@@ -97,7 +146,7 @@ async def api_driver_access(
     )
     if not ok:
         logger.error("[driver_access] grant failed mac=%s*** router=%s", mac[:8], router_id)
-        return _error_redirect("Не удалось выдать доступ. Попробуйте ещё раз.")
+        return _render_form(request, password, router_id, phone, note, "Не удалось выдать доступ. Попробуйте ещё раз.")
 
     now = datetime.utcnow().isoformat()
     conn = get_db()
@@ -118,7 +167,6 @@ async def api_driver_access(
 
     logger.info("[driver_access] SUCCESS phone=%s*** mac=%s*** router=%s", phone_norm[:7], mac[:8], router_id)
 
-    from urllib.parse import urlencode
     return RedirectResponse(
         url=f"/success?{urlencode({'mac': mac, 'router_id': router_id, 'minutes': 0, 'amount': 0, 'payment_method': 'driver'})}",
         status_code=303,

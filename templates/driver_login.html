@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Доступ для водителей - Wi-Fi Pay</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #1f2937;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 2rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            padding: 2rem;
+            width: 88%;
+            max-width: 400px;
+            border: 1px solid #f1f5f9;
+        }
+        .icon { text-align: center; margin-bottom: 0.75rem; font-size: 2.5rem; }
+        h1 { font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: #111827; text-align: center; }
+        .desc { color: #6b7280; font-size: 0.85rem; margin: 0 0 1.5rem 0; line-height: 1.5; text-align: center; }
+        .error-box {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 0.8rem;
+            padding: 0.8rem 1rem;
+            margin-bottom: 1.2rem;
+            color: #b91c1c;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        label { display: block; font-size: 0.85rem; font-weight: 600; color: #374151; margin-bottom: 0.4rem; }
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 0.85rem 1rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 0.9rem;
+            font-size: 1.05rem;
+            color: #111827;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus { border-color: #1c75ff; }
+        .btn {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            background-color: #1c75ff;
+            color: #fff;
+            border: none;
+            border-radius: 1rem;
+            padding: 1rem;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(28,117,255,0.25);
+            text-align: center;
+            margin-top: 1.2rem;
+        }
+        .btn:active { opacity: 0.88; }
+        .meta { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1.2rem; text-align: center; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="icon">🚌</div>
+    <h1>Доступ для водителей</h1>
+    <p class="desc">Введите пароль, чтобы выдать бессрочный доступ водителю автобуса.</p>
+
+    {% if error %}
+    <div class="error-box">{{ error }}</div>
+    {% endif %}
+
+    <form action="/driver_access" method="POST">
+        <label for="password">Пароль</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+
+        <button class="btn" type="submit">Продолжить</button>
+    </form>
+
+    <div class="meta">wifi-pay driver provisioning</div>
+</div>
+</body>
+</html>
