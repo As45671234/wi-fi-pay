@@ -168,12 +168,25 @@ function applyKaspiActivatedUi() {
     document.getElementById('hintText').textContent = 'Оплата подтверждена автоматически. Номер документа: ' + CONTRACT_NUMBER;
 }
 
+function applyPermanentUi() {
+    document.getElementById('pageTitle').textContent = 'Доступ активирован';
+    document.getElementById('pageSubtitle').textContent = 'Бессрочный доступ выдан. Можете закрыть эту вкладку.';
+    document.getElementById('timerLabel').textContent = 'Срок действия';
+    document.getElementById('timerDisplay').textContent = 'БЕССРОЧНО';
+    document.getElementById('timerDisplay').classList.remove('warning');
+    document.getElementById('hintText').textContent = 'Доступ не ограничен по времени и сохранится при смене устройства через /restore_access.';
+}
+
+const isPermanent = PAYMENT_METHOD === 'driver';
+
 // Expiry timestamp — persist so page refresh doesn't reset it
 const storageKey = `wf_expiry_${ROUTER_ID}_${MAC}`;
 let expiryTs = parseInt(localStorage.getItem(storageKey) || '0', 10);
 
 let isKaspiPending = PAYMENT_METHOD === 'kaspi' && !KASPI_IS_ACTIVATED;
-if (isKaspiPending) {
+if (isPermanent) {
+    applyPermanentUi();
+} else if (isKaspiPending) {
     applyKaspiPendingUi();
 } else {
     if (!expiryTs || expiryTs < Date.now()) {
@@ -198,6 +211,9 @@ function formatTime(ms) {
 
 let expired = false;
 function tick() {
+    if (isPermanent) {
+        return;
+    }
     if (isKaspiPending) {
         setTimeout(tick, 2000);
         return;
@@ -294,9 +310,9 @@ function syncFromServer() {
         });
 }
 
-// Для restore — не синкаемся с сервером: restore не создаёт запись в orders,
+// Для restore/driver — не синкаемся с сервером: они не создают запись в orders,
 // сервер вернёт "no session" и форсирует expire раньше времени.
-if (PAYMENT_METHOD !== 'restore') {
+if (PAYMENT_METHOD !== 'restore' && !isPermanent) {
     syncFromServer();
     setInterval(function() { syncFromServer(); }, 30000);
 }

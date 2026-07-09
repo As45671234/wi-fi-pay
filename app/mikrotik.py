@@ -467,6 +467,79 @@ def set_mikrotik_ah_access(mac: str, router_id: str, minutes: int, mode: str, se
                     pass
 
 
+def grant_driver_access(mac: str, router_id: str) -> bool:
+    """Бессрочный доступ (bypass ip-binding, без scheduler) — для водителей автобусов.
+    Заменяет ручной grant_permanent_access.sh. Комментарий PAID_ намеренно совпадает
+    с обычным PAID-доступом, чтобы remove_mac_binding() и защита от перезаписи в
+    _mikrotik_cleanup_old()/_mikrotik_check_existing_access() узнавали эти биндинги
+    при смене MAC водителем через /restore_access.
+    """
+    config = ROUTERS_CONFIG.get(router_id)
+    if not config:
+        logger.error(f"❌ Неизвестный router_id: {router_id}")
+        return False
+    if not _is_valid_mac(mac or ""):
+        logger.error(f"❌ Некорректный MAC: {mac}")
+        return False
+
+    connection = None
+    try:
+        connection, api = _make_router_api(config, socket_timeout=8.0)
+        binding = api.get_resource('/ip/hotspot/ip-binding')
+        active = api.get_resource('/ip/hotspot/active')
+        user_res = api.get_resource('/ip/hotspot/user')
+        cookie = api.get_resource('/ip/hotspot/cookie')
+        host = api.get_resource('/ip/hotspot/host')
+        sched = api.get_resource('/system/scheduler')
+
+        user_name = f"T-{mac.replace(':', '')}"
+        task_name = f"del_{mac.replace(':', '')}"
+
+        for row in binding.call('print', queries={'mac-address': mac}):
+            try:
+                binding.call('remove', arguments={'.id': row.get('id') or row.get('.id')})
+            except Exception:
+                pass
+        for row in active.call('print', queries={'mac-address': mac}):
+            try:
+                active.call('remove', arguments={'.id': row.get('id') or row.get('.id')})
+            except Exception:
+                pass
+        for row in user_res.call('print', queries={'name': user_name}):
+            try:
+                user_res.call('remove', arguments={'.id': row.get('id') or row.get('.id')})
+            except Exception:
+                pass
+        for row in cookie.call('print', queries={'mac-address': mac}):
+            try:
+                cookie.call('remove', arguments={'.id': row.get('id') or row.get('.id')})
+            except Exception:
+                pass
+        for row in host.call('print', queries={'mac-address': mac}):
+            try:
+                host.call('remove', arguments={'.id': row.get('id') or row.get('.id')})
+            except Exception:
+                pass
+        for row in sched.call('print', queries={'name': task_name}):
+            try:
+                sched.call('remove', arguments={'.id': row.get('id') or row.get('.id')})
+            except Exception:
+                pass
+
+        binding.call('add', arguments={'mac-address': mac, 'type': 'bypassed', 'comment': f'PAID_{mac}'})
+        logger.info(f"✅ DRIVER: бессрочный доступ выдан {mac[:8]}*** на {router_id}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ DRIVER grant error router={router_id} mac={mac[:8]}***: {str(e)[:200]}")
+        return False
+    finally:
+        if connection:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
+
+
 def remove_mac_binding(mac: str, router_id: str) -> bool:
     """Удаляет PAID-биндинг с MikroTik при смене MAC (для one-device constraint)."""
     config = ROUTERS_CONFIG.get(router_id)

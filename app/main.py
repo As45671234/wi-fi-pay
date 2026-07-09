@@ -17,7 +17,7 @@ from .db import init_db
 from .utils import get_client_ip
 from .kaspi_service import _kaspi_sync_loop
 from .pending import _pending_activation_loop
-from .routes import portal, misc, qr, payment, kaspi, admin, restore
+from .routes import portal, misc, qr, payment, kaspi, admin, restore, driver
 
 app = FastAPI(title="Wi-Fi Gateway Final")
 
@@ -67,6 +67,7 @@ app.include_router(payment.router)
 app.include_router(kaspi.router)
 app.include_router(admin.router)
 app.include_router(restore.router)
+app.include_router(driver.router)
 
 
 @app.on_event("startup")

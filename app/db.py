@@ -161,6 +161,17 @@ def init_db():
     ''')
     conn.execute("CREATE INDEX IF NOT EXISTS idx_phone_sessions_phone ON phone_sessions(phone)")
 
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS driver_phones (
+            phone TEXT PRIMARY KEY,
+            router_id TEXT,
+            mac_address TEXT,
+            note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     cursor.execute("PRAGMA table_info(orders)")
     o_columns = {row[1] for row in cursor.fetchall()}
     if 'phone' not in o_columns:
