@@ -173,5 +173,33 @@
         "user":  "",
         "pass":  "",
         "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_26",
+        "ip":  "10.0.0.27",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_27",
+        "ip":  "10.0.0.28",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_28",
+        "ip":  "10.0.0.29",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
+    },
+    {
+        "id":  "astana_29",
+        "ip":  "10.0.0.30",
+        "user":  "",
+        "pass":  "",
+        "portal_probe_url":  "http://captive.apple.com/hotspot-detect.html"
     }
 ]
