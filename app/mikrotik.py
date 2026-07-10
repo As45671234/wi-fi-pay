@@ -64,15 +64,27 @@ def _router_api_reachable(ip: str, port: int, timeout_sec: float = 2.0) -> bool:
 
 # ── QR MAC fallback ────────────────────────────────────────────────────────
 
-def _pick_qr_mac_fallback(router_id: str, busy_macs: set[str]) -> tuple[str | None, str]:
-    """Безопасный fallback: выбирает MAC только если есть ровно один свежий кандидат."""
+def _pick_qr_mac_fallback(
+    router_id: str,
+    busy_macs: set[str],
+    max_idle_seconds: int | None = None,
+    socket_timeout: float = 1.0,
+) -> tuple[str | None, str]:
+    """Безопасный fallback: выбирает MAC только если есть ровно один свежий кандидат.
+
+    max_idle_seconds/socket_timeout переопределяемы: QR-flow опрашивает часто и
+    держит их маленькими (1с/15с), а /driver_access — разовый вызов админом,
+    поэтому использует больший idle-допуск и socket_timeout (см. app/routes/driver.py).
+    """
     config = ROUTERS_CONFIG.get(router_id)
     if not config:
         return None, "router_unknown"
 
+    idle_limit = QR_FALLBACK_MAX_IDLE_SECONDS if max_idle_seconds is None else max_idle_seconds
+
     connection = None
     try:
-        connection, api = _make_router_api(config, socket_timeout=1.0)
+        connection, api = _make_router_api(config, socket_timeout=socket_timeout)
         host_res = api.get_resource('/ip/hotspot/host')
         rows = host_res.call('print')
     except Exception:
@@ -102,7 +114,7 @@ def _pick_qr_mac_fallback(router_id: str, busy_macs: set[str]) -> tuple[str | No
         idle_seconds = _routeros_duration_to_seconds(str(row.get('idle-time') or row.get('idle_time') or ""))
         if idle_seconds is None:
             continue
-        if idle_seconds > QR_FALLBACK_MAX_IDLE_SECONDS:
+        if idle_seconds > idle_limit:
             continue
 
         uptime_seconds = _routeros_duration_to_seconds(str(row.get('uptime') or "")) or 10**9

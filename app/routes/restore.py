@@ -136,18 +136,30 @@ async def api_restore_access(
 
     loop = asyncio.get_running_loop()
 
-    # Водители: бессрочный доступ, отдельно от платных phone_sessions/kaspi_orders.
+    # Водители: бессрочный доступ, но только на СВОЁМ роутере (автобусе).
+    # На чужих роутерах водитель — обычный клиент: платит и попадает в
+    # phone_sessions/kaspi_orders как все, без каких-либо привилегий.
     driver_old_mac, driver_old_router = _get_driver_binding(phone_norm)
-    if driver_old_mac:
+    if driver_old_mac and driver_old_router == router_id:
         if driver_old_mac != mac:
             logger.info("[restore] DRIVER MAC change %s***→%s*** router %s→%s phone=%s***",
                         driver_old_mac[:8], mac[:8], driver_old_router, router_id, phone_norm[:7])
-            await loop.run_in_executor(MIKROTIK_EXECUTOR, remove_mac_binding, driver_old_mac, driver_old_router)
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(MIKROTIK_EXECUTOR, remove_mac_binding, driver_old_mac, driver_old_router),
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("[restore] DRIVER remove_mac_binding timeout mac=%s*** router=%s",
+                               driver_old_mac[:8], driver_old_router)
 
-        ok = await asyncio.wait_for(
-            loop.run_in_executor(MIKROTIK_EXECUTOR, grant_driver_access, mac, router_id),
-            timeout=15.0,
-        )
+        try:
+            ok = await asyncio.wait_for(
+                loop.run_in_executor(MIKROTIK_EXECUTOR, grant_driver_access, mac, router_id),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            ok = False
         if not ok:
             logger.error("[restore] DRIVER activation failed mac=%s*** router=%s phone=%s***", mac[:8], router_id, phone_norm[:7])
             return RedirectResponse(
