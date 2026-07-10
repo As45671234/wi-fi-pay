@@ -110,7 +110,7 @@ def print_drivers(router_id: str | None = None) -> None:
 
     for rid in sorted(by_router.keys()):
         entries = by_router[rid]
-        print(f"\n{rid} ({len(entries)}/4):")
+        print(f"\n{rid} ({len(entries)}/5):")
         for row in entries:
             mac = row["mac_address"] or "не определён (ждёт /restore_access)"
             note = f" — {row['note']}" if row["note"] else ""

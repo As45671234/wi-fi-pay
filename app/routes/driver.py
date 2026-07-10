@@ -4,7 +4,7 @@ app/routes/driver.py — Driver whitelist provisioning (замена grant_perma
 Flow (два шага, пароль отдельно от формы):
   GET  /driver_access               → шаг 1: только пароль
   POST /driver_access               → проверка пароля → шаг 2: роутер (id) + телефон + комментарий
-  POST /api/driver_access           → повторная проверка пароля, лимит 4 телефона на роутер,
+  POST /api/driver_access           → повторная проверка пароля, лимит 5 телефона на роутер,
                                        автоопределение MAC на роутере (с ретраями), выдача
                                        бессрочного доступа, запись в driver_phones.
 
@@ -37,7 +37,7 @@ _MAC_DETECT_ATTEMPTS = 4
 _MAC_DETECT_SOCKET_TIMEOUT_SECONDS = 3.5
 _MAC_DETECT_RETRY_DELAY_SECONDS = 1.5
 _MAC_DETECT_MAX_IDLE_SECONDS = 180
-_MAX_DRIVERS_PER_ROUTER = 4
+_MAX_DRIVERS_PER_ROUTER = 5
 
 
 async def _detect_driver_mac(router_id: str, busy_macs: set[str]) -> tuple[str | None, str]:
