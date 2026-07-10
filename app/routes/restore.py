@@ -54,7 +54,10 @@ def _get_active_session(phone: str, now: datetime):
 
 
 def _get_driver_binding(phone: str):
-    """Возвращает (mac, router_id) для телефона водителя из белого списка, иначе (None, None)."""
+    """Возвращает (mac, router_id) для телефона водителя из белого списка, иначе (None, None).
+    mac может быть None/пустым, если номер зарегистрировали в /driver_access до того,
+    как удалось определить MAC на роутере — тогда первый же /restore_access с этим
+    номером привяжет реальный MAC устройства."""
     conn = get_db()
     try:
         row = conn.execute(
@@ -140,8 +143,8 @@ async def api_restore_access(
     # На чужих роутерах водитель — обычный клиент: платит и попадает в
     # phone_sessions/kaspi_orders как все, без каких-либо привилегий.
     driver_old_mac, driver_old_router = _get_driver_binding(phone_norm)
-    if driver_old_mac and driver_old_router == router_id:
-        if driver_old_mac != mac:
+    if driver_old_router == router_id:
+        if driver_old_mac and driver_old_mac != mac:
             logger.info("[restore] DRIVER MAC change %s***→%s*** router %s→%s phone=%s***",
                         driver_old_mac[:8], mac[:8], driver_old_router, router_id, phone_norm[:7])
             try:

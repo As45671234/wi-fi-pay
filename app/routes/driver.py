@@ -83,7 +83,7 @@ def _router_driver_counts() -> dict:
     return {row[0]: row[1] for row in rows}
 
 
-def _render_form(request: Request, password: str, router_id: str = "", phone: str = "", note: str = "", error: str = ""):
+def _render_form(request: Request, password: str, router_id: str = "", phone: str = "", note: str = "", error: str = "", info: str = ""):
     counts = _router_driver_counts()
     routers = [
         {"id": rid, "count": counts.get(rid, 0), "full": counts.get(rid, 0) >= _MAX_DRIVERS_PER_ROUTER}
@@ -100,6 +100,7 @@ def _render_form(request: Request, password: str, router_id: str = "", phone: st
             "phone": phone,
             "note": note,
             "error": error,
+            "info": info,
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -159,28 +160,23 @@ async def api_driver_access(
     busy_macs = _get_busy_activation_macs(router_id)
     mac, reason = await _detect_driver_mac(router_id, busy_macs)
 
-    if not mac:
-        logger.info("[driver_access] mac not found router=%s reason=%s phone=%s***", router_id, reason, phone_norm[:7])
-        if reason == "ambiguous":
-            hint = "В сети сейчас несколько новых устройств. Попросите пассажиров подождать или отключиться, и повторите."
-        elif reason in ("router_unavailable", "router_timeout", "router_error"):
-            hint = "Роутер не отвечает. Проверьте, что автобус на связи (мобильный интернет роутера), и повторите."
-        else:
-            hint = ("Убедитесь, что телефон водителя подключён к WiFi этого автобуса "
-                    "и хотя бы раз открывал страницу в браузере, и повторите.")
-        return _render_form(request, password, router_id, phone, note, f"Не удалось определить устройство. {hint}")
+    granted = False
+    if mac:
+        try:
+            granted = await asyncio.wait_for(
+                asyncio.get_running_loop().run_in_executor(MIKROTIK_EXECUTOR, grant_driver_access, mac, router_id),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            granted = False
+        if not granted:
+            logger.error("[driver_access] grant failed mac=%s*** router=%s", mac[:8], router_id)
 
-    try:
-        ok = await asyncio.wait_for(
-            asyncio.get_running_loop().run_in_executor(MIKROTIK_EXECUTOR, grant_driver_access, mac, router_id),
-            timeout=15.0,
-        )
-    except asyncio.TimeoutError:
-        ok = False
-    if not ok:
-        logger.error("[driver_access] grant failed mac=%s*** router=%s", mac[:8], router_id)
-        return _render_form(request, password, router_id, phone, note, "Не удалось выдать доступ. Попробуйте ещё раз.")
-
+    # Номер сохраняем в белый список ВСЕГДА, даже если MAC не определился или
+    # MikroTik временно недоступен — иначе номер "терялся" и его приходилось
+    # вводить заново. mac_address может остаться NULL: как только водитель сам
+    # зайдёт на /restore_access со своим телефоном, система привяжет реальный
+    # MAC его устройства (см. app/routes/restore.py::_get_driver_binding).
     now = datetime.utcnow().isoformat()
     conn = get_db()
     try:
@@ -198,9 +194,25 @@ async def api_driver_access(
     finally:
         conn.close()
 
-    logger.info("[driver_access] SUCCESS phone=%s*** mac=%s*** router=%s", phone_norm[:7], mac[:8], router_id)
+    if granted:
+        logger.info("[driver_access] SUCCESS phone=%s*** mac=%s*** router=%s", phone_norm[:7], mac[:8], router_id)
+        return RedirectResponse(
+            url=f"/success?{urlencode({'mac': mac, 'router_id': router_id, 'minutes': 0, 'amount': 0, 'payment_method': 'driver'})}",
+            status_code=303,
+        )
 
-    return RedirectResponse(
-        url=f"/success?{urlencode({'mac': mac, 'router_id': router_id, 'minutes': 0, 'amount': 0, 'payment_method': 'driver'})}",
-        status_code=303,
-    )
+    logger.info("[driver_access] SAVED pending grant phone=%s*** router=%s mac_found=%s reason=%s",
+                phone_norm[:7], router_id, bool(mac), reason)
+    if mac:
+        info = ("Номер сохранён, но роутер не подтвердил доступ (временная проблема сети). "
+                "Попробуйте ещё раз, либо водитель сам восстановит доступ на wifi-pay.kz "
+                "через «Уже оплачивали? Восстановить доступ» тем же номером.")
+    elif reason == "ambiguous":
+        info = ("Номер сохранён в списке водителей роутера {rid}. Устройство пока не определено — "
+                "в сети сейчас несколько новых устройств. Попробуйте ещё раз, либо водитель сам "
+                "восстановит доступ на wifi-pay.kz через «Уже оплачивали? Восстановить доступ».").format(rid=router_id)
+    else:
+        info = ("Номер сохранён в списке водителей роутера {rid}. Устройство пока не определено. "
+                "Доступ применится автоматически, как только водитель зайдёт на wifi-pay.kz "
+                "и нажмёт «Уже оплачивали? Восстановить доступ», введя этот номер.").format(rid=router_id)
+    return _render_form(request, password, router_id, info=info)
