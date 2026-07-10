@@ -116,7 +116,8 @@
 
 const MAC = "{{ mac }}";
 const ROUTER_ID = "{{ router_id }}";
-const MINUTES = parseInt("{{ minutes }}", 10) || 60;
+const _mRaw = parseInt("{{ minutes }}", 10);
+const MINUTES = Number.isNaN(_mRaw) ? 60 : _mRaw;
 const AMOUNT = parseInt("{{ amount }}", 10) || 0;
 const TARIFF_NAME_FROM_BACKEND = "{{ tariff_name }}";
 const PAYMENT_METHOD = "{{ payment_method }}";
@@ -134,6 +135,7 @@ const expiredRedirectUrl = tariffUrl;
 
 // Названия тарифов
 function tariffName(minutes) {
+    if (minutes <= 0) return "—";
     if (minutes >= 1440) return "Весь день";
     if (minutes >= 180) return "3 часа";
     if (minutes >= 60) return "1 час";
