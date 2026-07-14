@@ -56,7 +56,7 @@ def recalc_badges(tariffs: list[dict]) -> None:
         return
     tariffs[0]["badge"] = "Популярное"
     if len(tariffs) >= 3:
-        tariffs[-1]["badge"] = "Выгодно!"
+        tariffs[-1]["badge"] = "Супер выгодно"
 
 
 def normalize_and_sort(tariffs: list[dict]) -> list[dict]:

@@ -38,6 +38,10 @@
         .t-sub { margin: 2px 0 0; font-size: 0.76rem; color: #a3acb8; }
         .t-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
         .t-badge { font-size: 0.62rem; font-weight: 700; color: #fff; background: #60a5fa; border-radius: 8px; padding: 2px 8px; text-transform: uppercase; letter-spacing: 0.03em; }
+        .t-badge.badge-super { background: linear-gradient(135deg, #f59e0b, #f97316); box-shadow: 0 2px 6px rgba(249,115,22,0.35); }
+        .tariff-card.best-value { border-color: #fbbf24; box-shadow: 0 6px 18px rgba(245,158,11,0.14); }
+        .tariff-card.best-value.active { border-color: #f59e0b; background-color: #fffaf0; box-shadow: 0 12px 24px rgba(245,158,11,0.24); }
+        .tariff-card.best-value .selected-strip { background: linear-gradient(125deg, #fbbf24 0%, #f59e0b 45%, #f97316 100%); }
         .t-price {
             display: inline-flex;
             align-items: baseline;
@@ -179,7 +183,7 @@
     // fallback-tariffs:start
     const fallbackTariffs = [
   {
-    "amount": 300,
+    "amount": 400,
     "minutes": 60,
     "title": "1 час доступа",
     "subtitle": "Доступ на 1 час",
@@ -193,11 +197,11 @@
     "badge": ""
   },
   {
-    "amount": 1500,
+    "amount": 1111,
     "minutes": 1440,
-    "title": "Безлимит 1000 тг (24часа важно!)",
-    "subtitle": "Час бесплатно *",
-    "badge": "Выгодно!"
+    "title": "До конца поездки",
+    "subtitle": "Максимум комфорта",
+    "badge": "Супер выгодно"
   }
 ];
     // fallback-tariffs:end
@@ -257,12 +261,15 @@
     function renderTariffs(tariffs) {
         const list = document.getElementById('tariff-list');
         list.innerHTML = tariffs.map((tariff, index) => {
-            const visualBadge = tariff.badge || (index === 1 ? 'Оптимальный' : '');
-            const badgeHtml = visualBadge ? `<span class="t-badge">${escapeHtml(visualBadge)}</span>` : '';
+            const isBestValue = tariffs.length >= 3 && index === tariffs.length - 1;
+            const visualBadge = tariff.badge || (isBestValue ? 'Супер выгодно' : (index === 1 ? 'Оптимальный' : ''));
+            const badgeClass = isBestValue ? 't-badge badge-super' : 't-badge';
+            const badgeHtml = visualBadge ? `<span class="${badgeClass}">${escapeHtml(visualBadge)}</span>` : '';
             const amount = Number(tariff.amount) || 0;
             const minutes = Number(tariff.minutes) || 0;
+            const cardClass = isBestValue ? 'tariff-card best-value' : 'tariff-card';
             return `
-                <div onclick="selectT(${amount}, this)" class="tariff-card">
+                <div onclick="selectT(${amount}, this)" class="${cardClass}">
                     <div class="tariff-top">
                         <div class="t-left">
                             <span class="t-icon">${tariffIcon(minutes)}</span>
