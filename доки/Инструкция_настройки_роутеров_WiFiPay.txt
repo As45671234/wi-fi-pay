@@ -251,3 +251,14 @@ ROUTER_IPS=10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0
 
 # Добавляем новое правило и ставим его В САМЫЙ ВЕРХ (place-before=0)
 /ip firewall mangle add chain=forward action=change-mss new-mss=1300 passthrough=yes tcp-flags=syn protocol=tcp tcp-mss=1301-65535 comment="MTU_FIX" place-before=0
+
+
+режим home и hotspot: no. Выполни:
+/system device-mode update hotspot=yes
+
+/system device-mode update scheduler=yes
+
+После команды роутер может попросить физически нажать кнопку Reset на корпусе роутера в течение нескольких секунд для подтверждения (это защита MikroTik). Нажми кнопку когда попросит — роутер перезагрузится.
+
+После ребута проверь:
+/system device-mode print
