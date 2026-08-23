@@ -69,10 +69,6 @@ if not SECRET_KEY:
 # ── Misc constants ─────────────────────────────────────────────────────────
 KZ_TZ = ZoneInfo("Asia/Almaty")
 ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or "").strip()
-DRIVER_ACCESS_PASSWORD = (os.getenv("DRIVER_ACCESS_PASSWORD") or "").strip()
-if not DRIVER_ACCESS_PASSWORD:
-    logger.critical("DRIVER_ACCESS_PASSWORD не задан в .env! /driver_access не может работать безопасно — сервер не запустится.")
-    raise RuntimeError("DRIVER_ACCESS_PASSWORD is required")
 
 TRIAL_TOKEN_TTL_SECONDS = 5 * 60
 TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60

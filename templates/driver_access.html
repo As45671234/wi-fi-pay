@@ -103,8 +103,6 @@
     {% endif %}
 
     <form action="/api/driver_access" method="POST">
-        <input type="hidden" name="password" value="{{ password }}">
-
         <label for="router_id">Роутер (автобус)</label>
         <select id="router_id" name="router_id" required>
             <option value="">— выберите —</option>

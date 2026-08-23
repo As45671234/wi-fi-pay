@@ -1,26 +1,24 @@
 """
 app/routes/driver.py — Driver whitelist provisioning (замена grant_permanent_access.sh).
 
-Flow (два шага, пароль отдельно от формы):
-  GET  /driver_access               → шаг 1: только пароль
-  POST /driver_access               → проверка пароля → шаг 2: роутер (id) + телефон + комментарий
-  POST /api/driver_access           → повторная проверка пароля, лимит 5 телефона на роутер,
-                                       автоопределение MAC на роутере (с ретраями), выдача
-                                       бессрочного доступа, запись в driver_phones.
+Flow:
+  GET  /driver_access               → роутер (id) + телефон + комментарий
+  POST /api/driver_access           → лимит 5 телефона на роутер, автоопределение MAC
+                                       на роутере (с ретраями), выдача бессрочного доступа,
+                                       запись в driver_phones.
 
 Дальнейшая смена устройства водителем — самостоятельно через /restore_access
 (тот же номер телефона), без участия админа.
 """
 
 import asyncio
-import hmac as _hmac
 from datetime import datetime
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse
 
-from ..config import ROUTERS_CONFIG, DRIVER_ACCESS_PASSWORD, MIKROTIK_EXECUTOR, templates, logger
+from ..config import ROUTERS_CONFIG, MIKROTIK_EXECUTOR, templates, logger
 from ..db import get_db
 from ..utils import _normalize_phone
 from ..mikrotik import grant_driver_access, _pick_qr_mac_fallback
@@ -68,10 +66,6 @@ async def _detect_driver_mac(router_id: str, busy_macs: set[str]) -> tuple[str |
     return None, reason
 
 
-def _check_password(password: str) -> bool:
-    return bool(DRIVER_ACCESS_PASSWORD) and _hmac.compare_digest((password or "").strip(), DRIVER_ACCESS_PASSWORD)
-
-
 def _router_driver_counts() -> dict:
     conn = get_db()
     try:
@@ -83,7 +77,7 @@ def _router_driver_counts() -> dict:
     return {row[0]: row[1] for row in rows}
 
 
-def _render_form(request: Request, password: str, router_id: str = "", phone: str = "", note: str = "", error: str = "", info: str = ""):
+def _render_form(request: Request, router_id: str = "", phone: str = "", note: str = "", error: str = "", info: str = ""):
     counts = _router_driver_counts()
     routers = [
         {"id": rid, "count": counts.get(rid, 0), "full": counts.get(rid, 0) >= _MAX_DRIVERS_PER_ROUTER}
@@ -93,7 +87,6 @@ def _render_form(request: Request, password: str, router_id: str = "", phone: st
         "driver_access.html",
         {
             "request": request,
-            "password": password,
             "routers": routers,
             "max_drivers": _MAX_DRIVERS_PER_ROUTER,
             "router_id": router_id,
@@ -107,40 +100,23 @@ def _render_form(request: Request, password: str, router_id: str = "", phone: st
 
 
 @router.get("/driver_access")
-async def driver_login_page(request: Request, error: str = ""):
-    return templates.TemplateResponse(
-        "driver_login.html",
-        {"request": request, "error": error},
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@router.post("/driver_access")
-async def driver_login_submit(request: Request, password: str = Form(...)):
-    if not _check_password(password):
-        logger.warning("[driver_access] неверный пароль (шаг 1)")
-        return RedirectResponse(url=f"/driver_access?{urlencode({'error': 'Неверный пароль'})}", status_code=303)
-    return _render_form(request, password)
+async def driver_access_page(request: Request):
+    return _render_form(request)
 
 
 @router.post("/api/driver_access")
 async def api_driver_access(
     request: Request,
-    password: str = Form(...),
     router_id: str = Form(...),
     phone: str = Form(...),
     note: str = Form(""),
 ):
-    if not _check_password(password):
-        logger.warning("[driver_access] неверный пароль (шаг 2) router=%s", router_id)
-        return RedirectResponse(url=f"/driver_access?{urlencode({'error': 'Неверный пароль'})}", status_code=303)
-
     phone_norm = _normalize_phone(phone)
     if not phone_norm:
-        return _render_form(request, password, router_id, phone, note, "Некорректный номер телефона")
+        return _render_form(request, router_id, phone, note, "Некорректный номер телефона")
 
     if router_id not in ROUTERS_CONFIG:
-        return _render_form(request, password, router_id, phone, note, "Неизвестный роутер")
+        return _render_form(request, router_id, phone, note, "Неизвестный роутер")
 
     conn = get_db()
     try:
@@ -152,7 +128,7 @@ async def api_driver_access(
         conn.close()
     if count >= _MAX_DRIVERS_PER_ROUTER:
         return _render_form(
-            request, password, router_id, phone, note,
+            request, router_id, phone, note,
             f"На роутере {router_id} уже {_MAX_DRIVERS_PER_ROUTER} водителя(ей) — лимит достигнут. "
             "Освободите слот или выберите другой роутер.",
         )
@@ -215,4 +191,4 @@ async def api_driver_access(
         info = ("Номер сохранён в списке водителей роутера {rid}. Устройство пока не определено. "
                 "Доступ применится автоматически, как только водитель зайдёт на wifi-pay.kz "
                 "и нажмёт «Уже оплачивали? Восстановить доступ», введя этот номер.").format(rid=router_id)
-    return _render_form(request, password, router_id, info=info)
+    return _render_form(request, router_id, info=info)
