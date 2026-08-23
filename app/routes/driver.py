@@ -38,6 +38,12 @@ _MAC_DETECT_SOCKET_TIMEOUT_SECONDS = 3.5
 _MAC_DETECT_RETRY_DELAY_SECONDS = 1.5
 _MAC_DETECT_MAX_IDLE_SECONDS = 180
 _MAX_DRIVERS_PER_ROUTER = 5
+# Точечные исключения из общего лимита — конкретному роутеру нужно больше слотов.
+_MAX_DRIVERS_PER_ROUTER_OVERRIDES = {"astana_01": 6}
+
+
+def _max_drivers_for(router_id: str) -> int:
+    return _MAX_DRIVERS_PER_ROUTER_OVERRIDES.get(router_id, _MAX_DRIVERS_PER_ROUTER)
 
 
 async def _detect_driver_mac(router_id: str, busy_macs: set[str]) -> tuple[str | None, str]:
@@ -106,7 +112,7 @@ def _fetch_drivers_grouped() -> list[dict]:
             "note": row[3] or "",
         })
     return [
-        {"router_id": rid, "count": len(drivers), "drivers": drivers}
+        {"router_id": rid, "count": len(drivers), "max": _max_drivers_for(rid), "drivers": drivers}
         for rid, drivers in sorted(groups.items())
     ]
 
@@ -114,7 +120,7 @@ def _fetch_drivers_grouped() -> list[dict]:
 def _render_form(request: Request, router_id: str = "", phone: str = "", note: str = "", error: str = "", info: str = ""):
     counts = _router_driver_counts()
     routers = [
-        {"id": rid, "count": counts.get(rid, 0), "full": counts.get(rid, 0) >= _MAX_DRIVERS_PER_ROUTER}
+        {"id": rid, "count": counts.get(rid, 0), "max": _max_drivers_for(rid), "full": counts.get(rid, 0) >= _max_drivers_for(rid)}
         for rid in sorted(ROUTERS_CONFIG.keys())
     ]
     return templates.TemplateResponse(
@@ -122,7 +128,6 @@ def _render_form(request: Request, router_id: str = "", phone: str = "", note: s
         {
             "request": request,
             "routers": routers,
-            "max_drivers": _MAX_DRIVERS_PER_ROUTER,
             "router_id": router_id,
             "phone": phone,
             "note": note,
@@ -162,10 +167,11 @@ async def api_driver_access(
         ).fetchone()[0]
     finally:
         conn.close()
-    if count >= _MAX_DRIVERS_PER_ROUTER:
+    router_max = _max_drivers_for(router_id)
+    if count >= router_max:
         return _render_form(
             request, router_id, phone, note,
-            f"На роутере {router_id} уже {_MAX_DRIVERS_PER_ROUTER} водителя(ей) — лимит достигнут. "
+            f"На роутере {router_id} уже {router_max} водителя(ей) — лимит достигнут. "
             "Освободите слот или выберите другой роутер.",
         )
 

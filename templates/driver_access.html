@@ -166,11 +166,11 @@
             <option value="">— выберите —</option>
             {% for r in routers %}
             <option value="{{ r.id }}" {% if r.id == router_id %}selected{% endif %} {% if r.full and r.id != router_id %}disabled{% endif %}>
-                {{ r.id }} ({{ r.count }}/{{ max_drivers }}{% if r.full %} — занято{% endif %})
+                {{ r.id }} ({{ r.count }}/{{ r.max }}{% if r.full %} — занято{% endif %})
             </option>
             {% endfor %}
         </select>
-        <p class="limit-note">Максимум {{ max_drivers }} водителя на один роутер.</p>
+        <p class="limit-note">Лимит водителей на роутер обычно 5, для некоторых роутеров может быть больше — см. число в скобках выше.</p>
 
         <label for="phone">Номер телефона водителя</label>
         <input
@@ -201,7 +201,7 @@
         {% for g in driver_groups %}
         <div class="driver-group" data-router="{{ g.router_id }}">
             <button type="button" class="driver-group-header">
-                <span><span class="driver-group-title">{{ g.router_id }}</span><span class="driver-group-count">{{ g.count }}/{{ max_drivers }}</span></span>
+                <span><span class="driver-group-title">{{ g.router_id }}</span><span class="driver-group-count">{{ g.count }}/{{ g.max }}</span></span>
                 <span class="driver-group-chevron">▾</span>
             </button>
             <div class="driver-group-rows">
