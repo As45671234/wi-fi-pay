@@ -183,6 +183,8 @@ async def kaspi_check_pay_docs():
 
 @router.api_route("/api/kaspi/check", methods=["GET", "POST"])
 async def kaspi_check(request: Request):
+    if not KASPI_ENABLED:
+        return utf8_json_response({"result": 403, "message": "Kaspi режим отключен"}, status_code=403)
     if not _has_valid_checkpay_auth(request):
         return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
 
@@ -244,6 +246,8 @@ async def kaspi_check(request: Request):
 @router.api_route("/api/kaspi/pay", methods=["GET", "POST"])
 async def kaspi_pay(request: Request):
     from datetime import datetime
+    if not KASPI_ENABLED:
+        return utf8_json_response({"result": 403, "message": "Kaspi режим отключен"}, status_code=403)
     if not _has_valid_checkpay_auth(request):
         return utf8_json_response({"result": 401, "message": "Unauthorized"}, status_code=401)
 
@@ -324,6 +328,9 @@ async def kaspi_pay(request: Request):
 
 
 @router.post("/api/kaspi/sync_once")
-async def kaspi_sync_trigger():
+async def kaspi_sync_trigger(request: Request):
+    from .admin import _has_admin_auth
+    if not _has_admin_auth(request):
+        return utf8_json_response({"error": "Unauthorized"}, status_code=401)
     result = await kaspi_sync_once()
     return utf8_json_response(result)

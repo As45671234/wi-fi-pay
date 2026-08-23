@@ -21,6 +21,7 @@ from ..utils import (
     utf8_json_response, make_cid, _normalize_mac, _is_valid_mac,
     get_tariff_runtime_state, make_trial_signature, get_or_create_device_id,
     check_trial_used_last_24h, _set_device_cookie, _get_mac_from_cookie,
+    is_pay_window_capped,
 )
 from ..mikrotik import set_mikrotik_ah_access, _pick_qr_mac_fallback
 from ..pending import _get_busy_activation_macs
@@ -34,6 +35,14 @@ async def _create_pay_window(mac: str, router_id: str, cid: str) -> tuple[bool, 
     """Открывает PAY_WINDOW на MikroTik и записывает строку в orders.
     Всегда идёт на MikroTik — без DB-кэша.
     """
+    if is_pay_window_capped(mac):
+        logger.warning("[PAY_WINDOW] CAPPED cid=%s mac=%s*** router=%s — слишком много выдач без оплаты",
+                        cid, mac[:8], router_id)
+        return False, utf8_json_response(
+            {"ok": False, "error": "Слишком много попыток. Завершите оплату или повторите позже."},
+            status_code=429,
+        )
+
     # ── Вызов MikroTik через выделенный пул потоков (20 потоков) ──────────
     loop = asyncio.get_running_loop()
     try:

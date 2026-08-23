@@ -175,6 +175,19 @@ async def payment_result(request: Request):
 
         logger.info(f"[payment_result] ✓ Платеж успешен: {amount} ₸, MAC: {mac}, router: {router_id}")
 
+        if payment_order_id:
+            conn = get_db()
+            try:
+                existing = conn.execute(
+                    "SELECT status FROM orders WHERE payment_order_id = ? ORDER BY id DESC LIMIT 1",
+                    (payment_order_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if existing and existing[0] in ('PAYMENT_CONFIRMED', 'PAID'):
+                logger.info(f"[payment_result] дубликат колбэка игнорирован order={payment_order_id} status={existing[0]}")
+                return Response(content="OK", status_code=200)
+
         if not mac:
             description = params.get('pg_description', '')
             mac_match = re.search(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})", description)

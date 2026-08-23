@@ -229,24 +229,54 @@ def check_trial_used_last_24h(mac: str, device_id: str) -> bool:
 
 # ── Rate limiting ──────────────────────────────────────────────────────────
 
+def _bucket_rate_limited(bucket: dict, key: str, window_seconds: int, max_requests: int) -> bool:
+    """Generic sliding-window limiter shared by trial/restore/pay-window guards."""
+    now = int(time.time())
+    if len(bucket) > 5000:
+        cutoff = now - window_seconds
+        stale = [k for k, v in bucket.items() if not v or max(v) < cutoff]
+        for k in stale:
+            del bucket[k]
+    recent = [ts for ts in bucket.get(key, []) if now - ts < window_seconds]
+    if len(recent) >= max_requests:
+        bucket[key] = recent
+        return True
+    recent.append(now)
+    bucket[key] = recent
+    return False
+
+
 TRIAL_RATE_BUCKET: dict = {}
 
 
 def is_trial_rate_limited(request: Request) -> bool:
     ip = get_client_ip(request)
-    now = int(time.time())
-    if len(TRIAL_RATE_BUCKET) > 2000:
-        cutoff = now - TRIAL_RATE_LIMIT_WINDOW_SECONDS
-        stale = [k for k, v in TRIAL_RATE_BUCKET.items() if not v or max(v) < cutoff]
-        for k in stale:
-            del TRIAL_RATE_BUCKET[k]
-    recent = [ts for ts in TRIAL_RATE_BUCKET.get(ip, []) if now - ts < TRIAL_RATE_LIMIT_WINDOW_SECONDS]
-    if len(recent) >= TRIAL_RATE_LIMIT_MAX_REQUESTS:
-        TRIAL_RATE_BUCKET[ip] = recent
-        return True
-    recent.append(now)
-    TRIAL_RATE_BUCKET[ip] = recent
-    return False
+    return _bucket_rate_limited(TRIAL_RATE_BUCKET, ip, TRIAL_RATE_LIMIT_WINDOW_SECONDS, TRIAL_RATE_LIMIT_MAX_REQUESTS)
+
+
+# restore_access: телефон — единственный фактор, без OTP, поэтому ограничиваем
+# подбор номеров по IP (иначе можно перебирать номера водителей/клиентов и
+# угонять их доступ).
+RESTORE_RATE_BUCKET: dict = {}
+RESTORE_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
+RESTORE_RATE_LIMIT_MAX_REQUESTS = 5
+
+
+def is_restore_rate_limited(request: Request) -> bool:
+    ip = get_client_ip(request)
+    return _bucket_rate_limited(RESTORE_RATE_BUCKET, ip, RESTORE_RATE_LIMIT_WINDOW_SECONDS, RESTORE_RATE_LIMIT_MAX_REQUESTS)
+
+
+# PAY_WINDOW: полноценный bypass интернета без оплаты, автоудаляется через 180с,
+# но ничто не мешало переиздавать его до истечения — давая бесконечный бесплатный
+# доступ. Капаем суммарное число выдач на MAC в скользящем окне.
+PAY_WINDOW_RATE_BUCKET: dict = {}
+PAY_WINDOW_CAP_WINDOW_SECONDS = 30 * 60
+PAY_WINDOW_CAP_MAX_GRANTS = 3
+
+
+def is_pay_window_capped(mac: str) -> bool:
+    return _bucket_rate_limited(PAY_WINDOW_RATE_BUCKET, mac, PAY_WINDOW_CAP_WINDOW_SECONDS, PAY_WINDOW_CAP_MAX_GRANTS)
 
 
 # ── Trial HMAC signatures ──────────────────────────────────────────────────

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from kaspi_client import KaspiApiClient, KaspiClientError
 
 from .config import (
-    KASPI_ENABLED, KASPI_API_BASE_URL, KASPI_API_TOKEN,
+    KASPI_ENABLED, KASPI_API_BASE_URL, KASPI_API_TOKEN, KASPI_CHECKPAY_TOKEN,
     KASPI_ORDERS_PATH, KASPI_ORDER_DETAILS_PATH, KASPI_API_TIMEOUT_SECONDS,
     KASPI_SYNC_INTERVAL_SECONDS, KASPI_MATCH_WINDOW_MINUTES,
     KASPI_ACTIVATION_RETRY_DELAY_SECONDS, KASPI_MAX_ACTIVATION_RETRIES,
@@ -136,11 +136,12 @@ def _build_kaspi_client() -> KaspiApiClient:
 # ── Auth helper ────────────────────────────────────────────────────────────
 
 def _has_valid_checkpay_auth(request) -> bool:
-    import os
     import hmac as _hmac
-    token = (os.getenv("KASPI_CHECKPAY_TOKEN") or "").strip()
+    token = KASPI_CHECKPAY_TOKEN
     if not token:
-        return True
+        # KASPI_ENABLED=false гарантированно (config.py требует токен при KASPI_ENABLED=true) —
+        # но не доверяем без токена ни при каких обстоятельствах.
+        return False
     header_api_key = (request.headers.get("x-api-key") or "").strip()
     auth_header = (request.headers.get("authorization") or "").strip()
     bearer = ""

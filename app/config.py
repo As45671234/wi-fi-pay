@@ -69,7 +69,10 @@ if not SECRET_KEY:
 # ── Misc constants ─────────────────────────────────────────────────────────
 KZ_TZ = ZoneInfo("Asia/Almaty")
 ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or "").strip()
-DRIVER_ACCESS_PASSWORD = (os.getenv("DRIVER_ACCESS_PASSWORD") or "admin1234").strip()
+DRIVER_ACCESS_PASSWORD = (os.getenv("DRIVER_ACCESS_PASSWORD") or "").strip()
+if not DRIVER_ACCESS_PASSWORD:
+    logger.critical("DRIVER_ACCESS_PASSWORD не задан в .env! /driver_access не может работать безопасно — сервер не запустится.")
+    raise RuntimeError("DRIVER_ACCESS_PASSWORD is required")
 
 TRIAL_TOKEN_TTL_SECONDS = 5 * 60
 TRIAL_RATE_LIMIT_WINDOW_SECONDS = 10 * 60
@@ -114,6 +117,11 @@ PENDING_ACTIVATION_MAX_ATTEMPTS = max(1, int(os.getenv("PENDING_ACTIVATION_MAX_A
 KASPI_ENABLED = (os.getenv("KASPI_ENABLED", "false").strip().lower() == "true")
 KASPI_API_BASE_URL = os.getenv("KASPI_API_BASE_URL", "").strip()
 KASPI_API_TOKEN = os.getenv("KASPI_API_TOKEN", "").strip()
+KASPI_CHECKPAY_TOKEN = (os.getenv("KASPI_CHECKPAY_TOKEN") or "").strip()
+if KASPI_ENABLED and not KASPI_CHECKPAY_TOKEN:
+    logger.critical("KASPI_ENABLED=true, но KASPI_CHECKPAY_TOKEN не задан! /api/kaspi/check и /api/kaspi/pay "
+                     "были бы доступны без аутентификации — сервер не запустится.")
+    raise RuntimeError("KASPI_CHECKPAY_TOKEN is required when KASPI_ENABLED=true")
 KASPI_ORDERS_PATH = os.getenv("KASPI_ORDERS_PATH", "/orders").strip()
 KASPI_ORDER_DETAILS_PATH = os.getenv("KASPI_ORDER_DETAILS_PATH", "/orders/{order_id}").strip()
 KASPI_API_TIMEOUT_SECONDS = int(os.getenv("KASPI_API_TIMEOUT_SECONDS", "10") or "10")

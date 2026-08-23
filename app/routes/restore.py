@@ -14,7 +14,7 @@ from fastapi.responses import RedirectResponse
 
 from ..config import ROUTERS_CONFIG, MIKROTIK_EXECUTOR, templates, logger
 from ..db import get_db
-from ..utils import _normalize_phone, _is_valid_mac, utf8_json_response
+from ..utils import _normalize_phone, _is_valid_mac, utf8_json_response, is_restore_rate_limited, get_client_ip
 from ..mikrotik import set_mikrotik_ah_access, remove_mac_binding, grant_driver_access
 
 router = APIRouter()
@@ -127,6 +127,10 @@ async def api_restore_access(
 ):
     phone_norm = _normalize_phone(phone)
     error_redirect = f"/restore_access?mac={mac}&router_id={router_id}&cid={cid}&error="
+
+    if is_restore_rate_limited(request):
+        logger.warning("[restore] RATE LIMITED ip=%s mac=%s*** router=%s", get_client_ip(request), mac[:8], router_id)
+        return RedirectResponse(url=error_redirect + "Слишком много попыток. Повторите через несколько минут.", status_code=303)
 
     if not phone_norm:
         return RedirectResponse(url=error_redirect + "Некорректный номер телефона", status_code=303)
