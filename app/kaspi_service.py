@@ -139,9 +139,14 @@ def _has_valid_checkpay_auth(request) -> bool:
     import hmac as _hmac
     token = KASPI_CHECKPAY_TOKEN
     if not token:
-        # KASPI_ENABLED=false гарантированно (config.py требует токен при KASPI_ENABLED=true) —
-        # но не доверяем без токена ни при каких обстоятельствах.
-        return False
+        # KASPI_CHECKPAY_TOKEN не согласован с Kaspi — временно fail-open, чтобы не
+        # сломать реальные платежи, но громко логируем каждый такой случай, пока
+        # секрет не будет настроен на обеих сторонах (см. предупреждение в config.py).
+        logger.critical(
+            "[KASPI][AUTH] Непроверенный callback принят БЕЗ токена (KASPI_CHECKPAY_TOKEN не задан) "
+            "path=%s ip=%s", getattr(request, "url", ""), request.client.host if request.client else "?",
+        )
+        return True
     header_api_key = (request.headers.get("x-api-key") or "").strip()
     auth_header = (request.headers.get("authorization") or "").strip()
     bearer = ""

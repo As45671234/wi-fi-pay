@@ -119,9 +119,12 @@ KASPI_API_BASE_URL = os.getenv("KASPI_API_BASE_URL", "").strip()
 KASPI_API_TOKEN = os.getenv("KASPI_API_TOKEN", "").strip()
 KASPI_CHECKPAY_TOKEN = (os.getenv("KASPI_CHECKPAY_TOKEN") or "").strip()
 if KASPI_ENABLED and not KASPI_CHECKPAY_TOKEN:
+    # Не падаем при старте: неизвестно, шлёт ли Kaspi секрет на своей стороне —
+    # жёсткий отказ мог бы сломать реальные платежи. _has_valid_checkpay_auth
+    # логирует каждый непроверенный колбэк, чтобы дыра была на виду.
     logger.critical("KASPI_ENABLED=true, но KASPI_CHECKPAY_TOKEN не задан! /api/kaspi/check и /api/kaspi/pay "
-                     "были бы доступны без аутентификации — сервер не запустится.")
-    raise RuntimeError("KASPI_CHECKPAY_TOKEN is required when KASPI_ENABLED=true")
+                     "ПРИНИМАЮТ ЗАПРОСЫ БЕЗ АУТЕНТИФИКАЦИИ. Согласуйте секрет с Kaspi и задайте "
+                     "KASPI_CHECKPAY_TOKEN как можно скорее.")
 KASPI_ORDERS_PATH = os.getenv("KASPI_ORDERS_PATH", "/orders").strip()
 KASPI_ORDER_DETAILS_PATH = os.getenv("KASPI_ORDER_DETAILS_PATH", "/orders/{order_id}").strip()
 KASPI_API_TIMEOUT_SECONDS = int(os.getenv("KASPI_API_TIMEOUT_SECONDS", "10") or "10")
