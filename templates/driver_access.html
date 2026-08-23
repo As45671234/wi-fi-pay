@@ -88,19 +88,46 @@
         .meta { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1.2rem; text-align: center; }
         .limit-note { font-size: 0.75rem; color: #9ca3af; margin-top: 0.4rem; }
         .drivers-section { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #f1f5f9; }
-        .drivers-section h2 { font-size: 0.95rem; font-weight: 700; margin: 0 0 0.8rem 0; color: #111827; }
-        .driver-group { margin-bottom: 1rem; }
-        .driver-group-title { font-size: 0.75rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.4rem; }
+        .drivers-section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.8rem; }
+        .drivers-section h2 { font-size: 0.95rem; font-weight: 700; margin: 0; color: #111827; }
+        .drivers-count { font-size: 0.75rem; color: #9ca3af; font-weight: 600; }
+        .driver-search {
+            margin-bottom: 1rem;
+            padding: 0.7rem 1rem;
+            font-size: 0.9rem;
+            border-radius: 0.8rem;
+        }
+        .driver-search:focus { border-color: #1c75ff; }
+        .driver-group { margin-bottom: 0.5rem; border: 1px solid #f1f5f9; border-radius: 0.9rem; overflow: hidden; }
+        .driver-group-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.7rem 0.9rem;
+            background: #f8fafc;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            text-align: left;
+        }
+        .driver-group-title { font-size: 0.78rem; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.04em; }
+        .driver-group-count { font-size: 0.72rem; color: #9ca3af; font-weight: 600; margin-left: 0.4rem; }
+        .driver-group-chevron { font-size: 0.7rem; color: #9ca3af; transition: transform 0.15s; flex-shrink: 0; }
+        .driver-group.expanded .driver-group-chevron { transform: rotate(180deg); }
+        .driver-group-rows { display: none; padding: 0.5rem; }
+        .driver-group.expanded .driver-group-rows { display: block; }
         .driver-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 0.6rem;
-            padding: 0.6rem 0.8rem;
-            border: 1px solid #f1f5f9;
-            border-radius: 0.8rem;
-            margin-bottom: 0.4rem;
+            padding: 0.6rem 0.5rem;
+            border-bottom: 1px solid #f8fafc;
         }
+        .driver-row:last-child { border-bottom: none; }
+        .driver-row.hidden { display: none; }
         .driver-info { min-width: 0; }
         .driver-phone { font-size: 0.9rem; font-weight: 600; color: #111827; }
         .driver-meta { font-size: 0.72rem; color: #9ca3af; margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -117,6 +144,7 @@
         }
         .driver-delete-btn:active { opacity: 0.85; }
         .no-drivers { font-size: 0.8rem; color: #9ca3af; }
+        .no-results { font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 0.8rem 0; display: none; }
     </style>
 </head>
 <body>
@@ -162,29 +190,37 @@
         <button class="btn" type="submit">Выдать доступ</button>
     </form>
 
-    {% if drivers %}
+    {% if driver_groups %}
     <div class="drivers-section">
-        <h2>Текущие водители</h2>
-        {% set ns = namespace(current_router="") %}
-        {% for d in drivers %}
-            {% if d.router_id != ns.current_router %}
-                {% if not loop.first %}</div>{% endif %}
-                <div class="driver-group">
-                <div class="driver-group-title">{{ d.router_id }}</div>
-                {% set ns.current_router = d.router_id %}
-            {% endif %}
-            <div class="driver-row">
-                <div class="driver-info">
-                    <div class="driver-phone">{{ d.phone_display }}</div>
-                    <div class="driver-meta">{{ d.mac_address if d.mac_address else 'MAC не определён' }}{% if d.note %} — {{ d.note }}{% endif %}</div>
+        <div class="drivers-section-head">
+            <h2>Текущие водители</h2>
+            <span class="drivers-count">{{ driver_total }}</span>
+        </div>
+        <input type="search" class="driver-search" id="driver-search" placeholder="Поиск по телефону, роутеру, MAC или комментарию">
+
+        {% for g in driver_groups %}
+        <div class="driver-group" data-router="{{ g.router_id }}">
+            <button type="button" class="driver-group-header">
+                <span><span class="driver-group-title">{{ g.router_id }}</span><span class="driver-group-count">{{ g.count }}/{{ max_drivers }}</span></span>
+                <span class="driver-group-chevron">▾</span>
+            </button>
+            <div class="driver-group-rows">
+                {% for d in g.drivers %}
+                <div class="driver-row" data-search="{{ (d.phone_display ~ ' ' ~ d.phone ~ ' ' ~ g.router_id ~ ' ' ~ d.mac_address ~ ' ' ~ d.note) | lower }}">
+                    <div class="driver-info">
+                        <div class="driver-phone">{{ d.phone_display }}</div>
+                        <div class="driver-meta">{{ d.mac_address if d.mac_address else 'MAC не определён' }}{% if d.note %} — {{ d.note }}{% endif %}</div>
+                    </div>
+                    <form action="/api/driver_access/delete" method="POST" class="driver-delete-form">
+                        <input type="hidden" name="phone" value="{{ d.phone }}">
+                        <button type="submit" class="driver-delete-btn">Удалить</button>
+                    </form>
                 </div>
-                <form action="/api/driver_access/delete" method="POST" class="driver-delete-form">
-                    <input type="hidden" name="phone" value="{{ d.phone }}">
-                    <button type="submit" class="driver-delete-btn">Удалить</button>
-                </form>
+                {% endfor %}
             </div>
-            {% if loop.last %}</div>{% endif %}
+        </div>
         {% endfor %}
+        <p class="no-results" id="driver-no-results">Ничего не найдено</p>
     </div>
     {% endif %}
 
@@ -201,6 +237,48 @@ document.querySelectorAll('.driver-delete-form').forEach(function(form) {
         }
     });
 });
+
+document.querySelectorAll('.driver-group-header').forEach(function(header) {
+    header.addEventListener('click', function() {
+        header.closest('.driver-group').classList.toggle('expanded');
+    });
+});
+
+const driverSearch = document.getElementById('driver-search');
+if (driverSearch) {
+    const groups = Array.from(document.querySelectorAll('.driver-group'));
+    const noResults = document.getElementById('driver-no-results');
+
+    driverSearch.addEventListener('input', function() {
+        const query = this.value.trim().toLowerCase();
+        let anyVisible = false;
+
+        groups.forEach(function(group) {
+            const rows = Array.from(group.querySelectorAll('.driver-row'));
+
+            if (!query) {
+                group.style.display = '';
+                group.classList.remove('expanded');
+                rows.forEach(function(row) { row.classList.remove('hidden'); });
+                anyVisible = true;
+                return;
+            }
+
+            let groupHasMatch = false;
+            rows.forEach(function(row) {
+                const match = row.dataset.search.includes(query);
+                row.classList.toggle('hidden', !match);
+                if (match) groupHasMatch = true;
+            });
+
+            group.style.display = groupHasMatch ? '' : 'none';
+            group.classList.toggle('expanded', groupHasMatch);
+            if (groupHasMatch) anyVisible = true;
+        });
+
+        noResults.style.display = (query && !anyVisible) ? 'block' : 'none';
+    });
+}
 
 phoneInput.addEventListener('focus', function() {
     if (!this.value) this.value = '+7 ';

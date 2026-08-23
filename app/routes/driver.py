@@ -85,7 +85,8 @@ def _format_phone(phone: str) -> str:
     return phone
 
 
-def _fetch_all_drivers() -> list[dict]:
+def _fetch_drivers_grouped() -> list[dict]:
+    """Список водителей, сгруппированный по роутеру, для рендера сворачиваемых секций."""
     conn = get_db()
     try:
         rows = conn.execute(
@@ -94,15 +95,19 @@ def _fetch_all_drivers() -> list[dict]:
         ).fetchall()
     finally:
         conn.close()
-    return [
-        {
+
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        groups.setdefault(row[1], []).append({
             "phone": row[0],
             "phone_display": _format_phone(row[0]),
             "router_id": row[1],
             "mac_address": row[2] or "",
             "note": row[3] or "",
-        }
-        for row in rows
+        })
+    return [
+        {"router_id": rid, "count": len(drivers), "drivers": drivers}
+        for rid, drivers in sorted(groups.items())
     ]
 
 
@@ -123,7 +128,8 @@ def _render_form(request: Request, router_id: str = "", phone: str = "", note: s
             "note": note,
             "error": error,
             "info": info,
-            "drivers": _fetch_all_drivers(),
+            "driver_groups": _fetch_drivers_grouped(),
+            "driver_total": sum(counts.values()),
         },
         headers={"Cache-Control": "no-store"},
     )
