@@ -87,6 +87,36 @@
         .btn:active { opacity: 0.88; }
         .meta { font-size: 0.7rem; color: #d1d5db; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1.2rem; text-align: center; }
         .limit-note { font-size: 0.75rem; color: #9ca3af; margin-top: 0.4rem; }
+        .drivers-section { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #f1f5f9; }
+        .drivers-section h2 { font-size: 0.95rem; font-weight: 700; margin: 0 0 0.8rem 0; color: #111827; }
+        .driver-group { margin-bottom: 1rem; }
+        .driver-group-title { font-size: 0.75rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.4rem; }
+        .driver-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+            padding: 0.6rem 0.8rem;
+            border: 1px solid #f1f5f9;
+            border-radius: 0.8rem;
+            margin-bottom: 0.4rem;
+        }
+        .driver-info { min-width: 0; }
+        .driver-phone { font-size: 0.9rem; font-weight: 600; color: #111827; }
+        .driver-meta { font-size: 0.72rem; color: #9ca3af; margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .driver-delete-btn {
+            flex-shrink: 0;
+            background: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+            border-radius: 0.6rem;
+            padding: 0.5rem 0.7rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .driver-delete-btn:active { opacity: 0.85; }
+        .no-drivers { font-size: 0.8rem; color: #9ca3af; }
     </style>
 </head>
 <body>
@@ -132,11 +162,45 @@
         <button class="btn" type="submit">Выдать доступ</button>
     </form>
 
+    {% if drivers %}
+    <div class="drivers-section">
+        <h2>Текущие водители</h2>
+        {% set ns = namespace(current_router="") %}
+        {% for d in drivers %}
+            {% if d.router_id != ns.current_router %}
+                {% if not loop.first %}</div>{% endif %}
+                <div class="driver-group">
+                <div class="driver-group-title">{{ d.router_id }}</div>
+                {% set ns.current_router = d.router_id %}
+            {% endif %}
+            <div class="driver-row">
+                <div class="driver-info">
+                    <div class="driver-phone">{{ d.phone_display }}</div>
+                    <div class="driver-meta">{{ d.mac_address if d.mac_address else 'MAC не определён' }}{% if d.note %} — {{ d.note }}{% endif %}</div>
+                </div>
+                <form action="/api/driver_access/delete" method="POST" class="driver-delete-form">
+                    <input type="hidden" name="phone" value="{{ d.phone }}">
+                    <button type="submit" class="driver-delete-btn">Удалить</button>
+                </form>
+            </div>
+            {% if loop.last %}</div>{% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="meta">wifi-pay driver provisioning</div>
 </div>
 <script>
 'use strict';
 const phoneInput = document.getElementById('phone');
+
+document.querySelectorAll('.driver-delete-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+        if (!confirm('Удалить этот номер и отозвать доступ?')) {
+            e.preventDefault();
+        }
+    });
+});
 
 phoneInput.addEventListener('focus', function() {
     if (!this.value) this.value = '+7 ';

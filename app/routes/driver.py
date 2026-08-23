@@ -2,10 +2,12 @@
 app/routes/driver.py — Driver whitelist provisioning (замена grant_permanent_access.sh).
 
 Flow:
-  GET  /driver_access               → роутер (id) + телефон + комментарий
+  GET  /driver_access               → роутер (id) + телефон + комментарий + список водителей
   POST /api/driver_access           → лимит 5 телефона на роутер, автоопределение MAC
                                        на роутере (с ретраями), выдача бессрочного доступа,
                                        запись в driver_phones.
+  POST /api/driver_access/delete    → удаление номера из списка + отзыв PAID_ биндинга
+                                       на MikroTik, если MAC был определён.
 
 Дальнейшая смена устройства водителем — самостоятельно через /restore_access
 (тот же номер телефона), без участия админа.
@@ -21,7 +23,7 @@ from fastapi.responses import RedirectResponse
 from ..config import ROUTERS_CONFIG, MIKROTIK_EXECUTOR, templates, logger
 from ..db import get_db
 from ..utils import _normalize_phone
-from ..mikrotik import grant_driver_access, _pick_qr_mac_fallback
+from ..mikrotik import grant_driver_access, remove_mac_binding, _pick_qr_mac_fallback
 from ..pending import _get_busy_activation_macs
 
 router = APIRouter()
@@ -77,6 +79,33 @@ def _router_driver_counts() -> dict:
     return {row[0]: row[1] for row in rows}
 
 
+def _format_phone(phone: str) -> str:
+    if len(phone) == 11:
+        return f"+{phone[0]} {phone[1:4]} {phone[4:7]} {phone[7:9]} {phone[9:11]}"
+    return phone
+
+
+def _fetch_all_drivers() -> list[dict]:
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT phone, router_id, mac_address, note FROM driver_phones "
+            "ORDER BY router_id, updated_at DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "phone": row[0],
+            "phone_display": _format_phone(row[0]),
+            "router_id": row[1],
+            "mac_address": row[2] or "",
+            "note": row[3] or "",
+        }
+        for row in rows
+    ]
+
+
 def _render_form(request: Request, router_id: str = "", phone: str = "", note: str = "", error: str = "", info: str = ""):
     counts = _router_driver_counts()
     routers = [
@@ -94,6 +123,7 @@ def _render_form(request: Request, router_id: str = "", phone: str = "", note: s
             "note": note,
             "error": error,
             "info": info,
+            "drivers": _fetch_all_drivers(),
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -192,3 +222,46 @@ async def api_driver_access(
                 "Доступ применится автоматически, как только водитель зайдёт на wifi-pay.kz "
                 "и нажмёт «Уже оплачивали? Восстановить доступ», введя этот номер.").format(rid=router_id)
     return _render_form(request, router_id, info=info)
+
+
+@router.post("/api/driver_access/delete")
+async def api_driver_access_delete(request: Request, phone: str = Form(...)):
+    phone_norm = _normalize_phone(phone)
+    if not phone_norm:
+        return _render_form(request, error="Некорректный номер телефона")
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT router_id, mac_address FROM driver_phones WHERE phone=?",
+            (phone_norm,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return _render_form(request, error="Номер не найден в списке водителей")
+
+    driver_router, driver_mac = row[0], row[1]
+
+    if driver_mac:
+        try:
+            await asyncio.wait_for(
+                asyncio.get_running_loop().run_in_executor(
+                    MIKROTIK_EXECUTOR, remove_mac_binding, driver_mac, driver_router,
+                ),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[driver_access] delete: remove_mac_binding timeout mac=%s*** router=%s",
+                            driver_mac[:8], driver_router)
+
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM driver_phones WHERE phone=?", (phone_norm,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    logger.info("[driver_access] DELETED phone=%s*** router=%s", phone_norm[:7], driver_router)
+    return _render_form(request, info=f"Номер {_format_phone(phone_norm)} удалён из списка водителей ({driver_router}).")
